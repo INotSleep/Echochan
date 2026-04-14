@@ -1,0 +1,30 @@
+{
+  "devDependencies": {
+    "@types/node": "^25.6.0",
+    "typescript": "^6.0.2"
+  },
+  "name": "echochan",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "installffmpeg": "node scripts/installffmpeg.mjs",
+    "postinstall": "npm run installffmpeg",
+    "build": "tsc",
+    "dev:start": "npm run build && node dist/index.js"
+  },
+  "ffmpeg": {
+    "installDir": ".ffmpeg"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "type": "module",
+  "dependencies": {
+    "@discordjs/opus": "^0.10.0",
+    "@discordjs/voice": "^0.19.2",
+    "discord.js": "^14.26.2",
+    "dotenv": "^17.4.2",
+    "postgres": "^3.4.9"
+  }
+}
