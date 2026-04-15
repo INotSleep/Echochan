@@ -1,64 +1,52 @@
-type EventMap = Record<string, unknown>;
+type EventMap = object;
 
-type EventKeysWithPayload<TEvents extends EventMap> = {
-    [K in keyof TEvents]: TEvents[K] extends undefined ? never : K
-}[keyof TEvents];
+type EventKey<TEvents extends EventMap> = Extract<keyof TEvents, string>;
 
-type EventKeysWithoutPayload<TEvents extends EventMap> = {
-    [K in keyof TEvents]: TEvents[K] extends undefined ? K : never
-}[keyof TEvents];
+type EventArgs<T> = [T] extends [undefined] ? [] : [payload: T];
 
-type EventHandler<T> = T extends undefined
-    ? () => void | Promise<void>
-    : (payload: T) => void | Promise<void>;
+type EventHandler<T> = (...args: EventArgs<T>) => void | Promise<void>;
 
 export class EventBus<TEvents extends EventMap> {
-    private readonly handlers = new Map<keyof TEvents, Set<EventHandler<any>>>();
+    private readonly handlers = new Map<EventKey<TEvents>, Set<(...args: any[]) => void | Promise<void>>>();
 
-    public on<TKey extends keyof TEvents>(
+    public on<TKey extends EventKey<TEvents>>(
         event: TKey,
         handler: EventHandler<TEvents[TKey]>
     ): () => void {
         let set = this.handlers.get(event);
 
         if (!set) {
-            set = new Set<EventHandler<TEvents[TKey]>>();
+            set = new Set();
             this.handlers.set(event, set);
         }
 
-        set.add(handler);
+        set.add(handler as (...args: any[]) => void | Promise<void>);
 
         return () => {
             this.off(event, handler);
         };
     }
 
-    public once<TKey extends keyof TEvents>(
+    public once<TKey extends EventKey<TEvents>>(
         event: TKey,
         handler: EventHandler<TEvents[TKey]>
     ): () => void {
         let isActive = true;
 
-        const wrapped = (async (...args: [TEvents[TKey]] | []) => {
+        const wrapped: EventHandler<TEvents[TKey]> = async (...args) => {
             if (!isActive) {
                 return;
             }
 
             isActive = false;
-            this.off(event, wrapped as EventHandler<TEvents[TKey]>);
-
-            if (args.length === 0) {
-                await (handler as () => void | Promise<void>)();
-                return;
-            }
-
-            await (handler as (payload: TEvents[TKey]) => void | Promise<void>)(args[0]);
-        }) as EventHandler<TEvents[TKey]>;
+            this.off(event, wrapped);
+            await handler(...args);
+        };
 
         return this.on(event, wrapped);
     }
 
-    public off<TKey extends keyof TEvents>(
+    public off<TKey extends EventKey<TEvents>>(
         event: TKey,
         handler: EventHandler<TEvents[TKey]>
     ): void {
@@ -68,18 +56,18 @@ export class EventBus<TEvents extends EventMap> {
             return;
         }
 
-        set.delete(handler);
+        set.delete(handler as (...args: any[]) => void | Promise<void>);
 
         if (set.size === 0) {
             this.handlers.delete(event);
         }
     }
 
-    public listenerCount<TKey extends keyof TEvents>(event: TKey): number {
+    public listenerCount<TKey extends EventKey<TEvents>>(event: TKey): number {
         return this.handlers.get(event)?.size ?? 0;
     }
 
-    public removeAllListeners<TKey extends keyof TEvents>(event?: TKey): void {
+    public removeAllListeners<TKey extends EventKey<TEvents>>(event?: TKey): void {
         if (event === undefined) {
             this.handlers.clear();
             return;
@@ -88,14 +76,9 @@ export class EventBus<TEvents extends EventMap> {
         this.handlers.delete(event);
     }
 
-    public async emit<TKey extends EventKeysWithoutPayload<TEvents>>(event: TKey): Promise<void>;
-    public async emit<TKey extends EventKeysWithPayload<TEvents>>(
+    public async emit<TKey extends EventKey<TEvents>>(
         event: TKey,
-        payload: TEvents[TKey]
-    ): Promise<void>;
-    public async emit<TKey extends keyof TEvents>(
-        event: TKey,
-        payload?: TEvents[TKey]
+        ...args: EventArgs<TEvents[TKey]>
     ): Promise<void> {
         const set = this.handlers.get(event);
 
@@ -103,26 +86,16 @@ export class EventBus<TEvents extends EventMap> {
             return;
         }
 
-        const handlers = [...set];
+        const handlers = [...set] as Array<EventHandler<TEvents[TKey]>>;
 
         for (const handler of handlers) {
-            if (payload === undefined) {
-                await (handler as () => void | Promise<void>)();
-                continue;
-            }
-
-            await (handler as (payload: TEvents[TKey]) => void | Promise<void>)(payload);
+            await handler(...args);
         }
     }
 
-    public async emitParallel<TKey extends EventKeysWithoutPayload<TEvents>>(event: TKey): Promise<void>;
-    public async emitParallel<TKey extends EventKeysWithPayload<TEvents>>(
+    public async emitParallel<TKey extends EventKey<TEvents>>(
         event: TKey,
-        payload: TEvents[TKey]
-    ): Promise<void>;
-    public async emitParallel<TKey extends keyof TEvents>(
-        event: TKey,
-        payload?: TEvents[TKey]
+        ...args: EventArgs<TEvents[TKey]>
     ): Promise<void> {
         const set = this.handlers.get(event);
 
@@ -130,20 +103,12 @@ export class EventBus<TEvents extends EventMap> {
             return;
         }
 
-        const handlers = [...set];
+        const handlers = [...set] as Array<EventHandler<TEvents[TKey]>>;
 
-        await Promise.all(
-            handlers.map((handler) => {
-                if (payload === undefined) {
-                    return (handler as () => void | Promise<void>)();
-                }
-
-                return (handler as (payload: TEvents[TKey]) => void | Promise<void>)(payload);
-            })
-        );
+        await Promise.all(handlers.map((handler) => handler(...args)));
     }
 
-    public hasListeners<TKey extends keyof TEvents>(event: TKey): boolean {
+    public hasListeners<TKey extends EventKey<TEvents>>(event: TKey): boolean {
         return this.listenerCount(event) > 0;
     }
 }

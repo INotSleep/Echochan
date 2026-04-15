@@ -9,6 +9,9 @@ import { generateDependencyReport } from '@discordjs/voice';
 import { Logger } from './core/Logger.js';
 import { BotClient } from './core/BotClient.js';
 import { Storage } from './core/Storage.js';
+import { EventBus } from './core/EventBus.js';
+import { ServiceRegistry } from './core/ServiceRegistry.js';
+import type { Events } from './core/Events.js';
 
 dotenv.config();
 console.log(generateDependencyReport());
@@ -31,10 +34,15 @@ logger.then((logger: Logger) => {
 
     storage.init().then(() => {
         logger.info("Storage initialized");
+
+        const events = new EventBus<Events>();
+        const services = new ServiceRegistry();
+
+        const client = new BotClient(logger, storage, events, services);
+        client.login();
     }).catch((err) => {
         logger.error("Failed to initialize storage:", err);
     })
 
-    const client = new BotClient(logger, storage);
-    client.login();
+
 })

@@ -20,3 +20,7 @@ class ServiceRegistry {
         return service as T;
     }
 }
+
+export {
+    ServiceRegistry
+};

@@ -4,7 +4,6 @@ import { join, parse } from "node:path";
 import { pipeline } from "node:stream/promises";
 import { createGzip } from "node:zlib";
 import util from "node:util";
-import { assert } from "node:console";
 
 export type LogLevel = "trace" | "debug" | "info" | "warn" | "error" | "fatal";
 
@@ -61,6 +60,8 @@ interface NormalizedLoggerOptions {
     consoleFormatter: LogFormatter;
 }
 
+type RotateReason = "startup" | "date" | "size";
+
 class LogBackend {
     private readonly options: NormalizedLoggerOptions;
     private stream: WriteStream | null = null;
@@ -104,6 +105,7 @@ class LogBackend {
 
         if (this.options.writeToFile) {
             await fs.mkdir(this.options.logDir, { recursive: true });
+            await this.rotateOnStartupIfNeeded();
             await this.openStream();
             await this.cleanupArchives();
         }
@@ -264,6 +266,66 @@ class LogBackend {
         return parsed.name || "latest";
     }
 
+    private async fileExists(path: string): Promise<boolean> {
+        try {
+            await fs.stat(path);
+            return true;
+        } catch {
+            return false;
+        }
+    }
+
+    private async getUniqueArchivePaths(reason: RotateReason, now: Date): Promise<{
+        archivePlainPath: string;
+        archiveGzipPath: string;
+    }> {
+        const archiveBaseName = this.getArchiveBaseName();
+        const archiveStamp = this.getArchiveTimestamp(now);
+
+        let attempt = 0;
+
+        while (true) {
+            const suffix = attempt === 0 ? "" : `-${attempt}`;
+            const archivePlainName = `${archiveBaseName}-${archiveStamp}-${reason}${suffix}.log`;
+            const archivePlainPath = join(this.options.logDir, archivePlainName);
+            const archiveGzipPath = `${archivePlainPath}.gz`;
+
+            const plainExists = await this.fileExists(archivePlainPath);
+            const gzipExists = await this.fileExists(archiveGzipPath);
+
+            if (!plainExists && !gzipExists) {
+                return {
+                    archivePlainPath,
+                    archiveGzipPath
+                };
+            }
+
+            attempt++;
+        }
+    }
+
+    private async rotateOnStartupIfNeeded(): Promise<void> {
+        const currentLogPath = this.getCurrentLogPath();
+
+        let stat;
+        try {
+            stat = await fs.stat(currentLogPath);
+        } catch {
+            return;
+        }
+
+        if (!stat.isFile() || stat.size <= 0) {
+            return;
+        }
+
+        const now = new Date();
+        const { archivePlainPath, archiveGzipPath } = await this.getUniqueArchivePaths("startup", now);
+
+        await fs.rename(currentLogPath, archivePlainPath);
+        await this.gzipFile(archivePlainPath, archiveGzipPath);
+        await fs.unlink(archivePlainPath).catch(() => undefined);
+    }
+
     private async openStream(): Promise<void> {
         const logPath = this.getCurrentLogPath();
 
@@ -291,14 +353,18 @@ class LogBackend {
         this.stream = null;
 
         await new Promise<void>((resolve, reject) => {
-            stream.end((error: Error | null) => {
-                if (error) {
-                    reject(error);
-                    return;
-                }
+            const onError = (error: Error): void => {
+                stream.off("finish", onFinish);
+                reject(error);
+            };
 
+            const onFinish = (): void => {
+                stream.off("error", onError);
                 resolve();
-            });
+            };
+
+            stream.once("error", onError);
+            stream.end(onFinish);
         });
     }
 
@@ -343,17 +409,13 @@ class LogBackend {
             return;
         }
 
-        const reason = shouldRotateByDate ? "date" : "size";
+        const reason: RotateReason = shouldRotateByDate ? "date" : "size";
         await this.rotate(reason, now);
     }
 
-    private async rotate(reason: "date" | "size", now: Date): Promise<void> {
+    private async rotate(reason: RotateReason, now: Date): Promise<void> {
         const currentLogPath = this.getCurrentLogPath();
-        const archiveBaseName = this.getArchiveBaseName();
-        const archiveStamp = this.getArchiveTimestamp(now);
-        const archivePlainName = `${archiveBaseName}-${archiveStamp}-${reason}.log`;
-        const archivePlainPath = join(this.options.logDir, archivePlainName);
-        const archiveGzipPath = `${archivePlainPath}.gz`;
+        const { archivePlainPath, archiveGzipPath } = await this.getUniqueArchivePaths(reason, now);
 
         await this.closeStream();
 
