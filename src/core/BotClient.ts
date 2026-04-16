@@ -14,6 +14,8 @@ import { BinaryDownloadService } from "../services/BinaryDownloadService.js";
 import { QueueService } from "../playback/QueueService.js";
 import { CacheManager } from "../playback/CacheManager.js";
 import { PlaybackCoordinator } from "../playback/PlaybackCoordinator.js";
+import { CacheMaintenanceModule } from "../modules/CacheMaintenanceModule.js";
+import { PlaybackDiagnosticsModule } from "../modules/PlaybackDiagnosticsModule.js";
 
 class BotClient {
     client: Client;
@@ -116,7 +118,8 @@ class BotClient {
     }
 
     registerModules() {
-
+        this.registerModule(CacheMaintenanceModule);
+        this.registerModule(PlaybackDiagnosticsModule);
     }
 
     registerCommands() {
