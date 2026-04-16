@@ -1,3 +1,4 @@
+import type { DiscordClientAdapter } from "./DiscordClientAdapter.js";
 import type { EventBus } from "./EventBus.js";
 import type { Events } from "./Events.js";
 import type { Logger } from "./Logger.js";
@@ -10,8 +11,9 @@ interface Module {
     events: EventBus<Events>;
     services: ServiceRegistry;
     storage: Storage;
+    adapter: DiscordClientAdapter;
 
-    register(logger: Logger, events: EventBus<Events>, services: ServiceRegistry, storage: Storage): Promise<void>;
+    register(): Promise<void>;
 }
 
 export type {

@@ -12,6 +12,9 @@ declare global {
             POSTGRES_DB: string;
             POSTGRES_HOST: string;
             POSTGRES_PORT: string;
+
+            DEV_GUILD: string;
+            DEV_VOICE_CHANNEL: string;
         }
     }
 }
