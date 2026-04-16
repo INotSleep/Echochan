@@ -9,6 +9,8 @@ import { DiscordClientAdapter } from "./DiscordClientAdapter.js";
 import { CommandRegistry } from "./Command.js";
 import { createCommands } from "../commands/index.js";
 import { MusicPlaybackService } from "../services/MusicPlaybackService.js";
+import { LocalResolverService } from "../services/LocalResolverService.js";
+import { BinaryDownloadService } from "../services/BinaryDownloadService.js";
 
 class BotClient {
     client: Client;
@@ -44,6 +46,12 @@ class BotClient {
         this.commands = new CommandRegistry(this.client, this.logger, this.storage, this.events, this.services, this.adapter);
         this.commands.attachInteractionListener();
         this.services.register("music", new MusicPlaybackService(this.adapter, this.logger.child("Music")));
+        this.services.register("resolver", new LocalResolverService({
+            timeoutMs: parseInt(process.env.PROVIDER_TIMEOUT_MS || "15000", 10)
+        }));
+        this.services.register("downloader", new BinaryDownloadService({
+            timeoutMs: parseInt(process.env.PROVIDER_TIMEOUT_MS || "15000", 10)
+        }));
 
         this.registerCommands();
         this.registerEvents();

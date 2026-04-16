@@ -8,7 +8,7 @@ class PingCommand implements Command {
     };
 
     public async execute(interaction: Parameters<Command["execute"]>[0]): Promise<void> {
-        await interaction.reply("Pong!");
+        await interaction.editReply("Pong!");
     }
 }
 

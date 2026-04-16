@@ -14,24 +14,18 @@ class StopCommand implements Command {
         context: Parameters<Command["execute"]>[1]
     ): Promise<void> {
         if (!interaction.inGuild()) {
-            await interaction.reply({
-                content: "Команда доступна только на сервере.",
-                ephemeral: true
-            });
+            await interaction.editReply("Команда доступна только на сервере.");
             return;
         }
 
         const music = context.services.get<MusicPlaybackService>("music");
         const isStopped = music.stop(interaction.guildId);
         if (!isStopped) {
-            await interaction.reply({
-                content: "Сейчас ничего не играет.",
-                ephemeral: true
-            });
+            await interaction.editReply("Сейчас ничего не играет.");
             return;
         }
 
-        await interaction.reply("Остановил воспроизведение.");
+        await interaction.editReply("Остановил воспроизведение.");
     }
 }
 

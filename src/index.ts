@@ -1,8 +1,12 @@
 import path from 'node:path';
 import process from 'node:process';
 
-const ffmpegDir = path.resolve(process.cwd(), '.ffmpeg');
-process.env.PATH = `${ffmpegDir}${path.delimiter}${process.env.PATH ?? ''}`;
+const runtimeBinaryDirs = [
+    path.resolve(process.cwd(), process.env.FFMPEG_INSTALL_DIR || '.ffmpeg'),
+    path.resolve(process.cwd(), process.env.YTDLP_INSTALL_DIR || '.yt-dlp'),
+    path.resolve(process.cwd(), process.env.SPOTIFLAC_INSTALL_DIR || '.spotiflac')
+];
+process.env.PATH = `${runtimeBinaryDirs.join(path.delimiter)}${path.delimiter}${process.env.PATH ?? ''}`;
 
 import dotenv from 'dotenv';
 import { generateDependencyReport } from '@discordjs/voice';

@@ -7,6 +7,12 @@ declare global {
         interface ProcessEnv {
             BOT_TOKEN: string;
             BOT_CLIENT_ID: string;
+            PROVIDER_TIMEOUT_MS: string;
+            YTDLP_BIN: string;
+            SPOTIFLAC_BIN: string;
+            FFMPEG_INSTALL_DIR: string;
+            YTDLP_INSTALL_DIR: string;
+            SPOTIFLAC_INSTALL_DIR: string;
 
             POSTGRES_PASSWORD: string;
             POSTGRES_USER: string;

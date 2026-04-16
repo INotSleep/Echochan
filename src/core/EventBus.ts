@@ -7,7 +7,7 @@ type EventArgs<T> = [T] extends [undefined] ? [] : [payload: T];
 type EventHandler<T> = (...args: EventArgs<T>) => void | Promise<void>;
 
 export class EventBus<TEvents extends EventMap> {
-    private readonly handlers = new Map<EventKey<TEvents>, Set<(...args: any[]) => void | Promise<void>>>();
+    private readonly handlers = new Map<EventKey<TEvents>, Set<(...args: unknown[]) => void | Promise<void>>>();
 
     public on<TKey extends EventKey<TEvents>>(
         event: TKey,
@@ -20,7 +20,7 @@ export class EventBus<TEvents extends EventMap> {
             this.handlers.set(event, set);
         }
 
-        set.add(handler as (...args: any[]) => void | Promise<void>);
+        set.add(handler as (...args: unknown[]) => void | Promise<void>);
 
         return () => {
             this.off(event, handler);
@@ -56,7 +56,7 @@ export class EventBus<TEvents extends EventMap> {
             return;
         }
 
-        set.delete(handler as (...args: any[]) => void | Promise<void>);
+        set.delete(handler as (...args: unknown[]) => void | Promise<void>);
 
         if (set.size === 0) {
             this.handlers.delete(event);

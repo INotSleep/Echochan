@@ -1,6 +1,11 @@
 .ffmpeg
+.yt-dlp
+.spotiflac
 node_modules
 dist
 .env
 logs
 audio.mp3
+audio1.mp3
+__pycache__/
+*.pyc

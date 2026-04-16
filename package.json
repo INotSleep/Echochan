@@ -8,7 +8,10 @@
   "main": "index.js",
   "scripts": {
     "installffmpeg": "node scripts/installffmpeg.mjs",
-    "postinstall": "npm run installffmpeg",
+    "installytdlp": "node scripts/installytdlp.mjs",
+    "installspotiflac": "node scripts/installspotiflac.mjs",
+    "installbinaries": "node scripts/installbinaries.mjs",
+    "postinstall": "npm run installbinaries",
     "build": "tsc",
     "dev:start": "npm run build && node dist/index.js",
     "deploy": "npm run build && node dist/scripts/deployCommands.js global",
@@ -16,6 +19,12 @@
   },
   "ffmpeg": {
     "installDir": ".ffmpeg"
+  },
+  "ytdlp": {
+    "installDir": ".yt-dlp"
+  },
+  "spotiflac": {
+    "installDir": ".spotiflac"
   },
   "keywords": [],
   "author": "",

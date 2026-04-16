@@ -42,10 +42,10 @@ class MusicPlaybackService {
         return this.adapter.joinVoiceChannel(channel, false);
     }
 
-    playFile(channel: VoiceBasedChannel, filePath: string): void {
+    playSource(channel: VoiceBasedChannel, source: string): void {
         const connection = this.joinChannel(channel);
         const player = this.getOrCreatePlayer(channel.guild.id);
-        const resource = this.adapter.createAudioResource(filePath);
+        const resource = this.adapter.createAudioResource(source);
 
         player.play(resource);
         connection.subscribe(player);

@@ -1,5 +1,5 @@
 class ServiceRegistry {
-    private services: Map<string, any>;
+    private services: Map<string, unknown>;
 
     constructor() {
         this.services = new Map();

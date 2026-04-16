@@ -17,15 +17,12 @@ class JoinCommand implements Command {
         const channel = music.getMemberVoiceChannel(interaction);
 
         if (!channel) {
-            await interaction.reply({
-                content: "Сначала зайдите в голосовой канал.",
-                ephemeral: true
-            });
+            await interaction.editReply("Сначала зайдите в голосовой канал.");
             return;
         }
 
         const connection = music.joinChannel(channel);
-        await interaction.reply(`Подключился к **${channel.name}** (status: ${connection.state.status}).`);
+        await interaction.editReply(`Подключился к **${channel.name}** (status: ${connection.state.status}).`);
     }
 }
 

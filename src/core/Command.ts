@@ -88,6 +88,10 @@ class CommandRegistry {
         }
 
         try {
+            if (!interaction.deferred && !interaction.replied) {
+                await interaction.deferReply();
+            }
+
             await command.execute(interaction, this.context);
         } catch (error) {
             this.logger.error(`Command "${command.name}" failed:`, error);

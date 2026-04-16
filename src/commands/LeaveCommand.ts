@@ -14,24 +14,18 @@ class LeaveCommand implements Command {
         context: Parameters<Command["execute"]>[1]
     ): Promise<void> {
         if (!interaction.inGuild()) {
-            await interaction.reply({
-                content: "Команда доступна только на сервере.",
-                ephemeral: true
-            });
+            await interaction.editReply("Команда доступна только на сервере.");
             return;
         }
 
         const music = context.services.get<MusicPlaybackService>("music");
         const left = music.leave(interaction.guildId);
         if (!left) {
-            await interaction.reply({
-                content: "Я не подключён к голосовому каналу.",
-                ephemeral: true
-            });
+            await interaction.editReply("Я не подключён к голосовому каналу.");
             return;
         }
 
-        await interaction.reply("Отключился от голосового канала.");
+        await interaction.editReply("Отключился от голосового канала.");
     }
 }
 
