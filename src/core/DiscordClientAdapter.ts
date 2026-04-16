@@ -1,6 +1,5 @@
-import { createAudioPlayer, joinVoiceChannel, VoiceConnection, type CreateAudioPlayerOptions, type CreateAudioResourceOptions } from "@discordjs/voice";
-import type { Client, Guild, Snowflake, VoiceBasedChannel } from "discord.js";
-import type { group } from "node:console";
+import { createAudioPlayer, createAudioResource, getVoiceConnection, joinVoiceChannel, type AudioPlayer, type CreateAudioPlayerOptions, type CreateAudioResourceOptions, type VoiceConnection } from "@discordjs/voice";
+import type { Channel, Client, Guild, VoiceBasedChannel } from "discord.js";
 import type { Stream } from "node:stream";
 
 class DiscordClientAdapter {
@@ -10,15 +9,15 @@ class DiscordClientAdapter {
         this.client = client;
     }
 
-    async fetchChannel(id: string) {
+    async fetchChannel(id: string): Promise<Channel | null> {
         return await this.client.channels.fetch(id);
     }
 
-    async fetchGuild(id: string) {
+    async fetchGuild(id: string): Promise<Guild> {
         return await this.client.guilds.fetch(id);
     }
 
-    async joinVoiceChannel(channel: VoiceBasedChannel, selfDeaf: boolean = true, selfMute: boolean = false) {
+    joinVoiceChannel(channel: VoiceBasedChannel, selfDeaf: boolean = true, selfMute: boolean = false): VoiceConnection {
         return joinVoiceChannel({
             channelId: channel.id,
             guildId: channel.guild.id,
@@ -28,13 +27,21 @@ class DiscordClientAdapter {
         });
     }
 
-    async createAudioPlayer(options: CreateAudioPlayerOptions = {}) {
+    createAudioPlayer(options: CreateAudioPlayerOptions = {}): AudioPlayer {
         return createAudioPlayer(options);
     }
 
-    async createAudioResource(input: string | Stream.Readable, options: CreateAudioResourceOptions<unknown> = {}) {
-        const { createAudioResource } = await import("@discordjs/voice");
+    createAudioResource(input: string | Stream.Readable, options: CreateAudioResourceOptions<unknown> = {}) {
         return createAudioResource(input, options);
+    }
+
+    getVoiceConnection(guildId: string): VoiceConnection | undefined {
+        return getVoiceConnection(guildId);
+    }
+
+    destroyVoiceConnection(guildId: string): void {
+        const connection = this.getVoiceConnection(guildId);
+        connection?.destroy();
     }
 }
 

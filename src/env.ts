@@ -6,6 +6,7 @@ declare global {
     namespace NodeJS {
         interface ProcessEnv {
             BOT_TOKEN: string;
+            BOT_CLIENT_ID: string;
 
             POSTGRES_PASSWORD: string;
             POSTGRES_USER: string;

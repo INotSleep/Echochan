@@ -5,8 +5,10 @@ import type { Module } from "./Module.js";
 import type { EventBus } from "./EventBus.js";
 import type { Events as EchochanEvents } from "./Events.js";
 import type { ServiceRegistry } from "./ServiceRegistry.js";
-import { TestModule } from "../modules/TestModule.js";
 import { DiscordClientAdapter } from "./DiscordClientAdapter.js";
+import { CommandRegistry } from "./Command.js";
+import { createCommands } from "../commands/index.js";
+import { MusicPlaybackService } from "../services/MusicPlaybackService.js";
 
 class BotClient {
     client: Client;
@@ -16,6 +18,7 @@ class BotClient {
     events: EventBus<EchochanEvents>;
     services: ServiceRegistry;
     adapter: DiscordClientAdapter;
+    commands: CommandRegistry;
 
     constructor(logger: Logger, storage: Storage, events: EventBus<EchochanEvents>, services: ServiceRegistry) {
         this.logger = logger;
@@ -38,7 +41,11 @@ class BotClient {
 
         
         this.adapter = new DiscordClientAdapter(this.client);
+        this.commands = new CommandRegistry(this.client, this.logger, this.storage, this.events, this.services, this.adapter);
+        this.commands.attachInteractionListener();
+        this.services.register("music", new MusicPlaybackService(this.adapter, this.logger.child("Music")));
 
+        this.registerCommands();
         this.registerEvents();
         this.registerModules();
     }
@@ -48,9 +55,14 @@ class BotClient {
     }
 
     registerEvents() {
-        this.client.on(Events.ClientReady, () => {
+        this.client.on(Events.ClientReady, async() => {
             this.logger.info(`Logged in as ${this.client.user?.tag}`);
-            this.events.emit("core.ready");
+
+            try {
+                await this.events.emit("core.ready");
+            } catch (error) {
+                this.logger.error("Failed to finish ready lifecycle:", error);
+            }
         });
 
         this.client.on(Events.Error, (error) => {
@@ -69,11 +81,17 @@ class BotClient {
     ) {
         const module = new TypeRef(this.logger, this.events, this.services, this.storage, this.adapter);
         this.modules.push(module);
-        module.register();
+        void module.register().catch((error) => {
+            this.logger.error(`Failed to register module ${module.name}:`, error);
+        });
     }
 
     registerModules() {
-        this.registerModule(TestModule);
+
+    }
+
+    registerCommands() {
+        this.commands.registerMany(createCommands());
     }
 }
 

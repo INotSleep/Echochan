@@ -10,7 +10,9 @@
     "installffmpeg": "node scripts/installffmpeg.mjs",
     "postinstall": "npm run installffmpeg",
     "build": "tsc",
-    "dev:start": "npm run build && node dist/index.js"
+    "dev:start": "npm run build && node dist/index.js",
+    "deploy": "npm run build && node dist/scripts/deployCommands.js global",
+    "dev:deploy": "npm run build && node dist/scripts/deployCommands.js guild"
   },
   "ffmpeg": {
     "installDir": ".ffmpeg"
