@@ -249,7 +249,17 @@ class PlaybackCoordinator {
             return;
         }
 
+        const maxAdvanceAttempts = Math.max(1, snapshot.entries.length + 2);
+        let advanceAttempts = 0;
         while (current && (current.state === "failed" || current.state === "finished")) {
+            advanceAttempts += 1;
+            if (advanceAttempts > maxAdvanceAttempts) {
+                this.logger.error(
+                    `Orchestration loop guard triggered for guild ${guildId}. Prevented infinite terminal-state cycling.`
+                );
+                this.cancelPrefetch(guildId);
+                return;
+            }
             this.queue.skip(guildId);
             current = this.queue.ensureCurrent(guildId);
         }
@@ -353,6 +363,9 @@ class PlaybackCoordinator {
     }
 
     private async resolveEntryWithProvider(guildId: string, entry: QueueEntry): Promise<ResolvedTrack | null> {
+        this.logger.info(
+            `Resolving entry ${entry.id} in guild ${guildId}. inputType=${entry.inputType} input=${entry.input}`
+        );
         this.queue.updateEntryState(guildId, entry.id, "resolving_meta");
         void this.events.emit("track_resolving", {
             guildId,
@@ -371,6 +384,10 @@ class PlaybackCoordinator {
                 await this.markEntryFailed(guildId, entry.id, "Resolver returned no entries.");
                 return null;
             }
+
+            this.logger.info(
+                `Resolved entry ${entry.id} in guild ${guildId}. sourceType=${result.sourceType} entries=${result.entries.length}`
+            );
 
             const normalized = this.toResolvedTrack(entry, first);
             this.resolvedTracksById.set(normalized.id, normalized);
@@ -402,9 +419,16 @@ class PlaybackCoordinator {
             return null;
         }
 
+        this.logger.info(
+            `Warming entry ${entryId} in guild ${guildId}. provider=${candidate.provider} candidate=${candidate.id} input=${candidate.url ?? track.originalUrl}`
+        );
+
         const cacheKey = this.getCandidateCacheKey(track, candidate);
         const ready = this.cache.getReadyAsset(cacheKey);
         if (ready) {
+            this.logger.info(
+                `Cache hit for entry ${entryId} in guild ${guildId}. cacheKey=${cacheKey}`
+            );
             return ready;
         }
 
@@ -459,6 +483,9 @@ class PlaybackCoordinator {
                     guildId,
                     entryId
                 });
+                this.logger.info(
+                    `Warm ready for entry ${entryId} in guild ${guildId}. cacheKey=${cacheKey} path=${markedReady.filePath}`
+                );
                 return markedReady;
             } catch (error) {
                 const message = error instanceof BinaryDownloadError
@@ -608,6 +635,7 @@ class PlaybackCoordinator {
     }
 
     private async markEntryFailed(guildId: string, entryId: string, reason: string): Promise<void> {
+        this.logger.warn(`Entry failed in guild ${guildId}. entryId=${entryId} reason=${reason}`);
         this.queue.updateEntryState(guildId, entryId, "failed", {
             errorMessage: reason
         });
@@ -798,16 +826,14 @@ class PlaybackCoordinator {
 }
 
 function detectSourceType(input: string): SourceType {
-    const spotifyTrackMatch = /open\.spotify\.com\/track\/[a-zA-Z0-9]+/i.test(input);
-    if (spotifyTrackMatch) {
+    const spotify = parseSpotifyInput(input);
+    if (spotify?.kind === "track") {
         return "spotify_track";
     }
-    const spotifyAlbumMatch = /open\.spotify\.com\/album\/[a-zA-Z0-9]+/i.test(input);
-    if (spotifyAlbumMatch) {
+    if (spotify?.kind === "album") {
         return "spotify_album";
     }
-    const spotifyPlaylistMatch = /open\.spotify\.com\/playlist\/[a-zA-Z0-9]+/i.test(input);
-    if (spotifyPlaylistMatch) {
+    if (spotify?.kind === "playlist") {
         return "spotify_playlist";
     }
     if (/youtu\.be\/|youtube\.com\//i.test(input)) {
@@ -822,6 +848,44 @@ function detectSourceType(input: string): SourceType {
         return "unknown";
     }
     return "unknown";
+}
+
+function parseSpotifyInput(input: string): { kind: "track" | "album" | "playlist"; id: string } | null {
+    const uriMatch = input.match(/^spotify:(track|album|playlist):([A-Za-z0-9]+)$/i);
+    if (uriMatch) {
+        const kindRaw = uriMatch[1]?.toLowerCase();
+        const id = uriMatch[2]?.trim();
+        if (!id) {
+            return null;
+        }
+        if (kindRaw === "track" || kindRaw === "album" || kindRaw === "playlist") {
+            return { kind: kindRaw, id };
+        }
+    }
+
+    const url = safeUrl(input);
+    if (!url || !url.hostname.toLowerCase().endsWith("spotify.com")) {
+        return null;
+    }
+
+    const parts = url.pathname.split("/").filter(Boolean);
+    const kindIndex = parts.findIndex(
+        (part) => part === "track" || part === "album" || part === "playlist"
+    );
+    if (kindIndex < 0) {
+        return null;
+    }
+
+    const kind = parts[kindIndex];
+    const id = parts[kindIndex + 1];
+    if (!kind || !id) {
+        return null;
+    }
+
+    if (kind === "track" || kind === "album" || kind === "playlist") {
+        return { kind, id };
+    }
+    return null;
 }
 
 function mapSourceTypeToQueueInputType(sourceType: SourceType): QueueInputType {

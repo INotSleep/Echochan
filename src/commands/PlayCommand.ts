@@ -56,12 +56,13 @@ class PlayCommand implements Command {
                 input,
                 requestId: interaction.id
             });
-            await coordinator.ensurePlayback(channel.guild.id);
 
             const playlistNote = result.sourceType === "spotify_playlist"
                 ? ` Импортировано: **${result.addedCount}** треков${result.playlistTruncated ? " (обрезано лимитом)" : ""}.`
                 : "";
             await interaction.editReply(`Добавил в очередь.${playlistNote}`);
+
+            void coordinator.ensurePlayback(channel.guild.id);
         } catch (error) {
             const message = error instanceof Error ? error.message : "Не удалось добавить трек в очередь.";
             await interaction.editReply(`Ошибка: ${message}`);

@@ -7,7 +7,9 @@ declare global {
         interface ProcessEnv {
             BOT_TOKEN: string;
             BOT_CLIENT_ID: string;
+            LOG_LEVEL: "trace" | "debug" | "info" | "warn" | "error" | "fatal";
             PROVIDER_TIMEOUT_MS: string;
+            DOWNLOAD_TIMEOUT_MS: string;
             YTDLP_BIN: string;
             SPOTIFLAC_BIN: string;
             FFMPEG_INSTALL_DIR: string;

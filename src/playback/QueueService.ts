@@ -65,11 +65,29 @@ class QueueService {
         }
 
         if (state.currentIndex === null) {
-            state.currentIndex = 0;
+            const firstPlayable = this.findFirstPlayableIndex(state);
+            if (firstPlayable === null) {
+                state.playbackState = "idle";
+                return null;
+            }
+            state.currentIndex = firstPlayable;
             this.bumpRevision(state);
         }
 
-        const current = state.entries[state.currentIndex];
+        const indexedCurrent = state.entries[state.currentIndex];
+        if (!indexedCurrent || isTerminalState(indexedCurrent.state)) {
+            const nextPlayable = this.computeNextIndex(state, true);
+            if (nextPlayable === null) {
+                state.currentIndex = null;
+                state.playbackState = "idle";
+                this.bumpRevision(state);
+                return null;
+            }
+            state.currentIndex = nextPlayable;
+            this.bumpRevision(state);
+        }
+
+        const current = state.currentIndex === null ? null : state.entries[state.currentIndex];
         return current ? this.cloneEntry(current) : null;
     }
 
@@ -456,17 +474,24 @@ class QueueService {
 
         const currentIndex = state.currentIndex;
         if (currentIndex === null) {
-            return 0;
+            return this.findFirstPlayableIndex(state);
         }
 
-        if (!forceAdvance && state.loopMode === "track") {
+        const currentEntry = state.entries[currentIndex];
+        if (!forceAdvance && state.loopMode === "track" && currentEntry && !isTerminalState(currentEntry.state)) {
             return currentIndex;
         }
 
         if (state.shuffleEnabled && state.entries.length > 1) {
             const candidates = state.entries
                 .map((_, index) => index)
-                .filter((index) => index !== currentIndex);
+                .filter((index) => {
+                    if (index === currentIndex) {
+                        return false;
+                    }
+                    const entry = state.entries[index];
+                    return Boolean(entry && !isTerminalState(entry.state));
+                });
             if (candidates.length > 0) {
                 const randomIndex = Math.floor(Math.random() * candidates.length);
                 const selected = candidates[randomIndex];
@@ -476,15 +501,35 @@ class QueueService {
             }
         }
 
-        const nextSequential = currentIndex + 1;
-        if (nextSequential < state.entries.length) {
-            return nextSequential;
+        for (let i = currentIndex + 1; i < state.entries.length; i++) {
+            const entry = state.entries[i];
+            if (!entry || isTerminalState(entry.state)) {
+                continue;
+            }
+            return i;
         }
 
         if (state.loopMode === "queue") {
-            return 0;
+            for (let i = 0; i < currentIndex; i++) {
+                const entry = state.entries[i];
+                if (!entry || isTerminalState(entry.state)) {
+                    continue;
+                }
+                return i;
+            }
         }
 
+        return null;
+    }
+
+    private findFirstPlayableIndex(state: GuildQueueState): number | null {
+        for (let i = 0; i < state.entries.length; i++) {
+            const entry = state.entries[i];
+            if (!entry || isTerminalState(entry.state)) {
+                continue;
+            }
+            return i;
+        }
         return null;
     }
 
@@ -584,6 +629,10 @@ class QueueService {
 
 function isValidPosition(position: number, length: number): boolean {
     return Number.isInteger(position) && position >= 0 && position < length;
+}
+
+function isTerminalState(state: QueueEntryState): boolean {
+    return state === "finished" || state === "failed";
 }
 
 const ACTIVE_STATES = new Set<QueueEntryState>([

@@ -53,7 +53,7 @@ class BotClient {
             timeoutMs: parseInt(process.env.PROVIDER_TIMEOUT_MS || "15000", 10)
         });
         const downloader = new BinaryDownloadService({
-            timeoutMs: parseInt(process.env.PROVIDER_TIMEOUT_MS || "15000", 10)
+            downloadTimeoutMs: parseInt(process.env.DOWNLOAD_TIMEOUT_MS || "120000", 10)
         });
         const queue = new QueueService(this.events, this.logger.child("Playback"));
         const cache = new CacheManager(this.events, this.logger.child("Playback"));

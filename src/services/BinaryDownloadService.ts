@@ -34,16 +34,19 @@ class BinaryDownloadError extends Error {
 class BinaryDownloadService {
     private readonly ytdlpBinary: string;
     private readonly spotiflacBinary: string;
-    private readonly timeoutMs: number;
+    private readonly downloadTimeoutMs: number;
 
     constructor(options: {
         ytdlpBinary?: string;
         spotiflacBinary?: string;
         timeoutMs?: number;
+        downloadTimeoutMs?: number;
     } = {}) {
         this.ytdlpBinary = options.ytdlpBinary ?? resolveBinary("YTDLP_BIN", ".yt-dlp", "yt-dlp");
         this.spotiflacBinary = options.spotiflacBinary ?? resolveBinary("SPOTIFLAC_BIN", ".spotiflac", "spotiflac");
-        this.timeoutMs = options.timeoutMs ?? parseInt(process.env.PROVIDER_TIMEOUT_MS || "15000", 10);
+        this.downloadTimeoutMs = options.downloadTimeoutMs
+            ?? options.timeoutMs
+            ?? parseInt(process.env.DOWNLOAD_TIMEOUT_MS || "120000", 10);
     }
 
     public async downloadToFile(request: DownloadRequest): Promise<DownloadResult> {
@@ -81,6 +84,8 @@ class BinaryDownloadService {
             "--no-playlist",
             "--no-progress",
             "--force-overwrites",
+            "--format",
+            "bestaudio/best",
             "--output",
             outputPath,
             input
@@ -88,7 +93,7 @@ class BinaryDownloadService {
 
         try {
             const result = await execFileAsync(this.ytdlpBinary, args, {
-                timeout: this.timeoutMs,
+                timeout: this.downloadTimeoutMs,
                 windowsHide: true,
                 maxBuffer: 20 * 1024 * 1024,
                 env: buildExecEnv()
@@ -104,9 +109,13 @@ class BinaryDownloadService {
     }
 
     private async runSpotiFlac(input: string, outputPath: string): Promise<{ stdout: string; filePath: string }> {
+        const outputDir = path.dirname(outputPath);
+        await fs.promises.mkdir(outputDir, { recursive: true });
+        const baseline = await listDirectoryMtimeMap(outputDir);
+        const startedAt = Date.now();
+
         const attempts = [
-            ["download", "--output", outputPath, input],
-            ["--output", outputPath, input]
+            [input, outputDir]
         ];
 
         let lastError: unknown = null;
@@ -114,12 +123,23 @@ class BinaryDownloadService {
         for (const args of attempts) {
             try {
                 const result = await execFileAsync(this.spotiflacBinary, args, {
-                    timeout: this.timeoutMs,
+                    timeout: this.downloadTimeoutMs,
                     windowsHide: true,
                     maxBuffer: 20 * 1024 * 1024,
                     env: buildExecEnv()
                 });
-                const filePath = await this.resolveProducedFilePath(outputPath, "spotiflac");
+                const filePath = await this.resolveSpotiFlacProducedFilePath(outputDir, baseline, startedAt)
+                    .catch(() => null);
+                if (!filePath) {
+                    const failure = extractSpotiFlacFailure(result.stdout);
+                    if (failure) {
+                        throw new BinaryDownloadError("spotiflac", failure);
+                    }
+                    throw new BinaryDownloadError(
+                        "spotiflac",
+                        `SpotiFLAC exited without created audio file in ${outputDir}.`
+                    );
+                }
                 return {
                     stdout: result.stdout,
                     filePath
@@ -130,6 +150,37 @@ class BinaryDownloadService {
         }
 
         throw new BinaryDownloadError("spotiflac", getExecErrorMessage(lastError));
+    }
+
+    private async resolveSpotiFlacProducedFilePath(
+        outputDir: string,
+        baseline: Map<string, number>,
+        startedAt: number
+    ): Promise<string> {
+        const files = await listDirectoryFiles(outputDir);
+        const audioFiles = files.filter((file) => isAudioFile(file.fullPath));
+        const addedAudio = audioFiles.filter((file) => !baseline.has(file.name));
+        if (addedAudio.length > 0) {
+            addedAudio.sort((left, right) => right.mtimeMs - left.mtimeMs);
+            return addedAudio[0]!.fullPath;
+        }
+
+        const changedAudio = audioFiles.filter((file) => {
+            const oldMtime = baseline.get(file.name);
+            if (typeof oldMtime === "number") {
+                return file.mtimeMs > oldMtime;
+            }
+            return file.mtimeMs >= startedAt;
+        });
+        if (changedAudio.length > 0) {
+            changedAudio.sort((left, right) => right.mtimeMs - left.mtimeMs);
+            return changedAudio[0]!.fullPath;
+        }
+
+        throw new BinaryDownloadError(
+            "spotiflac",
+            `Downloaded audio file was not found in output directory: ${outputDir}`
+        );
     }
 
     private async resolveProducedFilePath(outputPath: string, provider: DownloadProvider): Promise<string> {
@@ -257,6 +308,80 @@ async function pathExistsAsFile(filePath: string): Promise<boolean> {
         return false;
     }
     return stat.isFile();
+}
+
+async function listDirectoryFiles(dirPath: string): Promise<Array<{ name: string; fullPath: string; mtimeMs: number }>> {
+    const entries = await fs.promises.readdir(dirPath, { withFileTypes: true });
+    const files: Array<{ name: string; fullPath: string; mtimeMs: number }> = [];
+
+    for (const entry of entries) {
+        if (!entry.isFile()) {
+            continue;
+        }
+
+        const fullPath = path.join(dirPath, entry.name);
+        const stat = await fs.promises.stat(fullPath).catch(() => null);
+        if (!stat || !stat.isFile()) {
+            continue;
+        }
+
+        files.push({
+            name: entry.name,
+            fullPath,
+            mtimeMs: stat.mtimeMs
+        });
+    }
+
+    return files;
+}
+
+async function listDirectoryMtimeMap(dirPath: string): Promise<Map<string, number>> {
+    const files = await listDirectoryFiles(dirPath);
+    const map = new Map<string, number>();
+    for (const file of files) {
+        map.set(file.name, file.mtimeMs);
+    }
+    return map;
+}
+
+function isAudioFile(filePath: string): boolean {
+    const ext = path.extname(filePath).toLowerCase();
+    return [
+        ".flac",
+        ".mp3",
+        ".m4a",
+        ".aac",
+        ".wav",
+        ".ogg",
+        ".opus",
+        ".webm",
+        ".mp4",
+        ".mkv"
+    ].includes(ext);
+}
+
+function extractSpotiFlacFailure(stdout: string): string | null {
+    const lines = stdout
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter(Boolean);
+    if (lines.length === 0) {
+        return null;
+    }
+
+    const hasFailedAllServices = lines.some((line) => line.includes("Failed all services"));
+    const failedDownloadIndex = lines.findIndex((line) => line.startsWith("Failed downloads:"));
+    if (!hasFailedAllServices && failedDownloadIndex < 0) {
+        return null;
+    }
+
+    const errorLine = lines.find((line) => line.startsWith("Error: "));
+    if (errorLine) {
+        return `SpotiFLAC failed: ${errorLine.replace(/^Error:\s*/i, "").trim()}`;
+    }
+
+    const tail = lines.slice(Math.max(0, lines.length - 3)).join(" | ");
+    return `SpotiFLAC failed all services. ${tail}`;
 }
 
 export type {

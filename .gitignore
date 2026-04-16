@@ -8,3 +8,4 @@ logs
 audio.mp3
 audio1.mp3
 .cache
+.tmp

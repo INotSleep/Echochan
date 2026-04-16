@@ -22,7 +22,7 @@ console.log(generateDependencyReport());
 
 const logger = Logger.create({
     name: "Echochan",
-    level: "info",
+    level: (process.env.LOG_LEVEL as "trace" | "debug" | "info" | "warn" | "error" | "fatal" | undefined) ?? "info",
     logDir: path.resolve(process.cwd(), 'logs'),
     writeToConsole: true,
     writeToFile: true,

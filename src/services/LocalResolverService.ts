@@ -168,89 +168,8 @@ class LocalResolverService implements ResolverClient {
             return [];
         }
 
-        const attempts: string[][] = [
-            ["resolve", "--json", input],
-            ["--json", input]
-        ];
-
-        let lastError: unknown = null;
-
-        for (const args of attempts) {
-            try {
-                const stdout = await this.runBinary(this.spotiflacBinary, args);
-                const payload = parseJsonFromMixedOutput(stdout);
-                const rawEntries = extractEntries(payload);
-                if (rawEntries.length === 0) {
-                    continue;
-                }
-
-                const entries: ResolvedEntry[] = [];
-                for (let i = 0; i < rawEntries.length; i++) {
-                    const raw = rawEntries[i];
-                    if (!raw || typeof raw !== "object") {
-                        continue;
-                    }
-
-                    const rawObj = raw as Record<string, unknown>;
-                    const canonical = readString(rawObj.canonical_id)
-                        ?? readString(rawObj.spotify_uri)
-                        ?? getCanonicalId(sourceType, input, rawObj);
-                    const entryId = stableId("entry", canonical ?? `${input}:${i}`);
-
-                    entries.push({
-                        id: entryId,
-                        title: readString(rawObj.title) ?? readString(rawObj.name),
-                        artists: normalizeArtists(rawObj.artists)
-                            ?? normalizeArtists(rawObj.artist)
-                            ?? [],
-                        durationMs: parseDurationMs(rawObj.duration_ms ?? rawObj.duration),
-                        artworkUrl: readString(rawObj.artwork_url)
-                            ?? readString(rawObj.thumbnail)
-                            ?? readString(rawObj.cover_url),
-                        originalInput: input,
-                        canonicalId: canonical,
-                        candidates: [
-                            {
-                                id: stableId("candidate", `${entryId}:spotiflac:stream`),
-                                provider: "spotiflac",
-                                kind: "stream",
-                                quality: "lossless",
-                                url: readString(rawObj.stream_url)
-                                    ?? readString(rawObj.streamUrl)
-                                    ?? readString(rawObj.url),
-                                metadata: {
-                                    providerRawId: readString(rawObj.id) ?? readString(rawObj.track_id)
-                                }
-                            },
-                            {
-                                id: stableId("candidate", `${entryId}:spotiflac:download`),
-                                provider: "spotiflac",
-                                kind: "download",
-                                quality: "lossless",
-                                url: readString(rawObj.download_url)
-                                    ?? readString(rawObj.downloadUrl)
-                                    ?? readString(rawObj.file_url),
-                                metadata: {
-                                    providerRawId: readString(rawObj.id) ?? readString(rawObj.track_id)
-                                }
-                            }
-                        ]
-                    });
-                }
-
-                if (entries.length > 0) {
-                    return entries;
-                }
-            } catch (error) {
-                lastError = error;
-            }
-        }
-
-        if (lastError) {
-            throw lastError;
-        }
-
-        return [];
+        const metadata = await fetchSpotifyMetadata(input, this.timeoutMs);
+        return [createSyntheticSpotifyEntry(input, sourceType, metadata)];
     }
 
     private async runBinary(binary: string, args: string[]): Promise<string> {
@@ -400,7 +319,7 @@ function extractEntries(payload: unknown): unknown[] {
 }
 
 function detectSourceType(input: string): SourceType {
-    const spotify = extractSpotify(input);
+    const spotify = parseSpotifyInput(input);
     if (spotify?.kind === "track") return "spotify_track";
     if (spotify?.kind === "album") return "spotify_album";
     if (spotify?.kind === "playlist") return "spotify_playlist";
@@ -418,15 +337,37 @@ function detectSourceType(input: string): SourceType {
     return "unknown";
 }
 
-function extractSpotify(input: string): { kind: "track" | "album" | "playlist"; id: string } | null {
+function parseSpotifyInput(input: string): { kind: "track" | "album" | "playlist"; id: string } | null {
+    const uriMatch = input.match(/^spotify:(track|album|playlist):([A-Za-z0-9]+)$/i);
+    if (uriMatch) {
+        const kindRaw = uriMatch[1]?.toLowerCase();
+        const id = uriMatch[2]?.trim();
+        if (!id) {
+            return null;
+        }
+        if (kindRaw === "track" || kindRaw === "album" || kindRaw === "playlist") {
+            return { kind: kindRaw, id };
+        }
+    }
+
     const url = safeUrl(input);
     if (!url) return null;
     if (!url.hostname.toLowerCase().endsWith("spotify.com")) return null;
+
     const parts = url.pathname.split("/").filter(Boolean);
-    if (parts.length < 2) return null;
-    const kind = parts[0];
-    const id = parts[1];
-    if (!id) return null;
+    const kindIndex = parts.findIndex(
+        (part) => part === "track" || part === "album" || part === "playlist"
+    );
+    if (kindIndex < 0) {
+        return null;
+    }
+
+    const kind = parts[kindIndex];
+    const id = parts[kindIndex + 1];
+    if (!kind || !id) {
+        return null;
+    }
+
     if (kind === "track" || kind === "album" || kind === "playlist") {
         return { kind, id };
     }
@@ -444,7 +385,7 @@ function safeUrl(value: string): URL | null {
 }
 
 function getCanonicalId(sourceType: SourceType, input: string, raw?: Record<string, unknown>): string | null {
-    const spotify = extractSpotify(input);
+    const spotify = parseSpotifyInput(input);
     if (spotify) {
         return `spotify:${spotify.kind}:${spotify.id}`;
     }
@@ -527,6 +468,179 @@ function normalizeCandidate(candidate: ResolveCandidate): ResolveCandidate {
         url: candidate.url ?? null,
         metadata: candidate.metadata ?? {}
     };
+}
+
+type SpotifyOEmbedMetadata = {
+    title: string | null;
+    artists: string[];
+    artworkUrl: string | null;
+};
+
+function createSyntheticSpotifyEntry(
+    input: string,
+    sourceType: SourceType,
+    metadata: SpotifyOEmbedMetadata | null
+): ResolvedEntry {
+    const canonical = getCanonicalId(sourceType, input) ?? `spotify:unknown:${stableId("spotify", input)}`;
+    const entryId = stableId("entry", canonical);
+    const searchQuery = buildYtSearchQuery(metadata);
+
+    return {
+        id: entryId,
+        title: metadata?.title ?? null,
+        artists: metadata?.artists ?? [],
+        durationMs: null,
+        artworkUrl: metadata?.artworkUrl ?? null,
+        originalInput: input,
+        canonicalId: canonical,
+        candidates: [
+            {
+                id: stableId("candidate", `${entryId}:spotiflac:download`),
+                provider: "spotiflac",
+                kind: "download",
+                quality: "lossless",
+                url: input,
+                metadata: {
+                    synthetic: true
+                }
+            },
+            {
+                id: stableId("candidate", `${entryId}:ytdlp:download`),
+                provider: "ytdlp",
+                kind: "download",
+                quality: "lossy",
+                url: searchQuery,
+                metadata: {
+                    synthetic: true,
+                    strategy: "spotify_fallback_search"
+                }
+            }
+        ]
+    };
+}
+
+async function fetchSpotifyMetadata(input: string, timeoutMs: number): Promise<SpotifyOEmbedMetadata | null> {
+    const parsed = parseSpotifyInput(input);
+    if (!parsed) {
+        return null;
+    }
+
+    const canonicalUrl = `https://open.spotify.com/${parsed.kind}/${parsed.id}`;
+    const oembedEndpoint = `https://open.spotify.com/oembed?url=${encodeURIComponent(canonicalUrl)}`;
+    const controller = new AbortController();
+    const timer = setTimeout(() => {
+        controller.abort();
+    }, Math.max(1_000, timeoutMs));
+
+    try {
+        const response = await fetch(oembedEndpoint, {
+            method: "GET",
+            signal: controller.signal
+        });
+        if (!response.ok) {
+            return null;
+        }
+
+        const payload = await response.json() as {
+            title?: unknown;
+            author_name?: unknown;
+            thumbnail_url?: unknown;
+        };
+
+        const titleRaw = readString(payload.title);
+        const thumbnail = readString(payload.thumbnail_url);
+        const parsedTitle = normalizeSpotifyTitle(titleRaw);
+        const htmlMetadata = await fetchSpotifyHtmlMetadata(canonicalUrl, controller.signal);
+        const artists = htmlMetadata.artists;
+        const mergedTitle = htmlMetadata.title ?? parsedTitle;
+        const mergedArtwork = htmlMetadata.artworkUrl ?? thumbnail;
+
+        return {
+            title: mergedTitle,
+            artists,
+            artworkUrl: mergedArtwork
+        };
+    } catch {
+        return null;
+    } finally {
+        clearTimeout(timer);
+    }
+}
+
+function normalizeSpotifyTitle(raw: string | null): string | null {
+    if (!raw) {
+        return null;
+    }
+    const cleaned = raw.replace(/\s*\|\s*Spotify$/i, "").trim();
+    return cleaned || null;
+}
+
+async function fetchSpotifyHtmlMetadata(url: string, signal: AbortSignal): Promise<SpotifyOEmbedMetadata> {
+    const response = await fetch(url, {
+        method: "GET",
+        signal
+    });
+    if (!response.ok) {
+        return {
+            title: null,
+            artists: [],
+            artworkUrl: null
+        };
+    }
+
+    const html = await response.text();
+    const metaTitle = readString(extractMetaContent(html, "og:title"));
+    const ogDescription = readString(extractMetaContent(html, "og:description"));
+    const musician = readString(extractMetaContent(html, "music:musician_description"));
+    const thumbnail = readString(extractMetaContent(html, "og:image"));
+
+    const artists: string[] = [];
+    if (musician) {
+        artists.push(musician);
+    } else if (ogDescription) {
+        const firstPart = ogDescription.split("·")[0]?.trim();
+        if (firstPart) {
+            artists.push(firstPart);
+        }
+    }
+
+    return {
+        title: normalizeSpotifyTitle(metaTitle),
+        artists,
+        artworkUrl: thumbnail
+    };
+}
+
+function extractMetaContent(html: string, propertyOrName: string): string | null {
+    const escaped = escapeRegex(propertyOrName);
+    const propertyPattern = new RegExp(
+        `<meta\\s+[^>]*property=["']${escaped}["'][^>]*content=["']([^"']+)["'][^>]*>`,
+        "i"
+    );
+    const namePattern = new RegExp(
+        `<meta\\s+[^>]*name=["']${escaped}["'][^>]*content=["']([^"']+)["'][^>]*>`,
+        "i"
+    );
+    const propertyMatch = html.match(propertyPattern);
+    if (propertyMatch?.[1]) {
+        return propertyMatch[1];
+    }
+    const nameMatch = html.match(namePattern);
+    return nameMatch?.[1] ?? null;
+}
+
+function escapeRegex(value: string): string {
+    return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function buildYtSearchQuery(metadata: SpotifyOEmbedMetadata | null): string {
+    const artistPart = metadata?.artists?.[0] ?? "";
+    const titlePart = metadata?.title ?? "";
+    const query = `${titlePart} ${artistPart} audio`.trim();
+    if (!query) {
+        return "ytsearch1:spotify track";
+    }
+    return `ytsearch1:${query}`;
 }
 
 export {
