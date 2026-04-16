@@ -1,5 +1,5 @@
 import type { Command } from "../core/Command.js";
-import { MusicPlaybackService } from "../services/MusicPlaybackService.js";
+import { PlaybackCoordinator } from "../playback/PlaybackCoordinator.js";
 
 class StopCommand implements Command {
     public readonly name = "stop";
@@ -18,13 +18,8 @@ class StopCommand implements Command {
             return;
         }
 
-        const music = context.services.get<MusicPlaybackService>("music");
-        const isStopped = music.stop(interaction.guildId);
-        if (!isStopped) {
-            await interaction.editReply("Сейчас ничего не играет.");
-            return;
-        }
-
+        const coordinator = context.services.get<PlaybackCoordinator>("coordinator");
+        await coordinator.stop(interaction.guildId, false);
         await interaction.editReply("Остановил воспроизведение.");
     }
 }

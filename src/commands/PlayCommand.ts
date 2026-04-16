@@ -2,10 +2,8 @@ import { ApplicationCommandOptionType } from "discord.js";
 import { access } from "node:fs/promises";
 import path from "node:path";
 import type { Command } from "../core/Command.js";
-import type { ResolveCandidate } from "../resolver/contracts.js";
-import type { ResolverClient } from "../resolver/client/ResolverClient.js";
 import { MusicPlaybackService } from "../services/MusicPlaybackService.js";
-import { LocalResolverError } from "../services/LocalResolverService.js";
+import { PlaybackCoordinator } from "../playback/PlaybackCoordinator.js";
 
 class PlayCommand implements Command {
     public readonly name = "play";
@@ -49,38 +47,24 @@ class PlayCommand implements Command {
             }
         }
 
-        const resolver = context.services.get<ResolverClient>("resolver");
+        const coordinator = context.services.get<PlaybackCoordinator>("coordinator");
         try {
-            const result = await resolver.resolve({
-                input,
+            music.joinChannel(channel);
+            const result = await coordinator.enqueue({
+                guildId: channel.guild.id,
                 requestedBy: interaction.user.id,
+                input,
                 requestId: interaction.id
             });
+            await coordinator.ensurePlayback(channel.guild.id);
 
-            const firstEntry = result.entries[0];
-            if (!firstEntry) {
-                await interaction.editReply("Резолвер не вернул ни одного трека.");
-                return;
-            }
-
-            const candidate = pickPlayableCandidate(firstEntry.candidates);
-            if (!candidate || !candidate.url) {
-                await interaction.editReply("Для этого трека не найден playable URL у кандидатов резолва.");
-                return;
-            }
-
-            music.playSource(channel, candidate.url);
-            const title = firstEntry.title ?? "Unknown title";
-            await interaction.editReply(
-                `Воспроизвожу: **${title}** (source: \`${result.sourceType}\`, provider: \`${candidate.provider}\`) в **${channel.name}**.`
-            );
+            const playlistNote = result.sourceType === "spotify_playlist"
+                ? ` Импортировано: **${result.addedCount}** треков${result.playlistTruncated ? " (обрезано лимитом)" : ""}.`
+                : "";
+            await interaction.editReply(`Добавил в очередь.${playlistNote}`);
         } catch (error) {
-            if (error instanceof LocalResolverError) {
-                await interaction.editReply(`Ошибка резолвера: \`${error.code}\` — ${error.message}`);
-                return;
-            }
-
-            await interaction.editReply("Не удалось обработать input для резолва.");
+            const message = error instanceof Error ? error.message : "Не удалось добавить трек в очередь.";
+            await interaction.editReply(`Ошибка: ${message}`);
         }
     }
 
@@ -105,20 +89,6 @@ class PlayCommand implements Command {
             return null;
         }
     }
-}
-
-function pickPlayableCandidate(candidates: ResolveCandidate[]): ResolveCandidate | null {
-    const streamWithUrl = candidates.find((candidate) => candidate.kind === "stream" && candidate.url);
-    if (streamWithUrl) {
-        return streamWithUrl;
-    }
-
-    const downloadWithUrl = candidates.find((candidate) => candidate.kind === "download" && candidate.url);
-    if (downloadWithUrl) {
-        return downloadWithUrl;
-    }
-
-    return null;
 }
 
 export {

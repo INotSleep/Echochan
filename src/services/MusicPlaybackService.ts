@@ -3,10 +3,16 @@ import type { ChatInputCommandInteraction, GuildMember, VoiceBasedChannel } from
 import type { DiscordClientAdapter } from "../core/DiscordClientAdapter.js";
 import type { Logger } from "../core/Logger.js";
 
+type TrackIdleListener = (guildId: string) => void;
+type TrackErrorListener = (payload: { guildId: string; error: Error }) => void;
+
 class MusicPlaybackService {
     private readonly adapter: DiscordClientAdapter;
     private readonly logger: Logger;
     private readonly guildPlayers = new Map<string, AudioPlayer>();
+    private readonly guildTrackActive = new Map<string, boolean>();
+    private readonly idleListeners = new Set<TrackIdleListener>();
+    private readonly errorListeners = new Set<TrackErrorListener>();
 
     constructor(adapter: DiscordClientAdapter, logger: Logger) {
         this.adapter = adapter;
@@ -43,12 +49,25 @@ class MusicPlaybackService {
     }
 
     playSource(channel: VoiceBasedChannel, source: string): void {
-        const connection = this.joinChannel(channel);
-        const player = this.getOrCreatePlayer(channel.guild.id);
-        const resource = this.adapter.createAudioResource(source);
+        this.joinChannel(channel);
+        const started = this.playInGuild(channel.guild.id, source);
+        if (!started) {
+            throw new Error(`No active voice connection for guild ${channel.guild.id}.`);
+        }
+    }
 
+    playInGuild(guildId: string, source: string): boolean {
+        const connection = this.adapter.getVoiceConnection(guildId);
+        if (!connection) {
+            return false;
+        }
+
+        const player = this.getOrCreatePlayer(guildId);
+        const resource = this.adapter.createAudioResource(source);
         player.play(resource);
         connection.subscribe(player);
+        this.guildTrackActive.set(guildId, true);
+        return true;
     }
 
     stop(guildId: string): boolean {
@@ -57,8 +76,25 @@ class MusicPlaybackService {
             return false;
         }
 
+        this.guildTrackActive.set(guildId, false);
         player.stop(true);
         return true;
+    }
+
+    pause(guildId: string): boolean {
+        const player = this.guildPlayers.get(guildId);
+        if (!player) {
+            return false;
+        }
+        return player.pause();
+    }
+
+    resume(guildId: string): boolean {
+        const player = this.guildPlayers.get(guildId);
+        if (!player) {
+            return false;
+        }
+        return player.unpause();
     }
 
     leave(guildId: string): boolean {
@@ -69,7 +105,26 @@ class MusicPlaybackService {
 
         connection.destroy();
         this.guildPlayers.delete(guildId);
+        this.guildTrackActive.delete(guildId);
         return true;
+    }
+
+    onTrackIdle(listener: TrackIdleListener): () => void {
+        this.idleListeners.add(listener);
+        return () => {
+            this.idleListeners.delete(listener);
+        };
+    }
+
+    onTrackError(listener: TrackErrorListener): () => void {
+        this.errorListeners.add(listener);
+        return () => {
+            this.errorListeners.delete(listener);
+        };
+    }
+
+    hasGuildPlayer(guildId: string): boolean {
+        return this.guildPlayers.has(guildId);
     }
 
     private getOrCreatePlayer(guildId: string): AudioPlayer {
@@ -85,7 +140,28 @@ class MusicPlaybackService {
         });
 
         player.on(AudioPlayerStatus.Idle, () => {
+            const wasActive = this.guildTrackActive.get(guildId) ?? false;
+            this.guildTrackActive.set(guildId, false);
             this.logger.debug(`Playback became idle in guild ${guildId}.`);
+            if (!wasActive) {
+                return;
+            }
+
+            for (const listener of this.idleListeners) {
+                listener(guildId);
+            }
+        });
+
+        player.on("error", (error) => {
+            const typedError = error instanceof Error ? error : new Error(String(error));
+            this.guildTrackActive.set(guildId, false);
+            this.logger.error(`Playback error in guild ${guildId}:`, typedError);
+            for (const listener of this.errorListeners) {
+                listener({
+                    guildId,
+                    error: typedError
+                });
+            }
         });
 
         this.guildPlayers.set(guildId, player);

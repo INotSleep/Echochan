@@ -59,23 +59,23 @@ class BinaryDownloadService {
         await fs.promises.mkdir(outputDir, { recursive: true });
 
         if (request.provider === "ytdlp") {
-            const stdout = await this.runYtDlp(input, outputPath);
+            const result = await this.runYtDlp(input, outputPath);
             return {
-                filePath: outputPath,
+                filePath: result.filePath,
                 provider: "ytdlp",
-                stdout
+                stdout: result.stdout
             };
         }
 
-        const stdout = await this.runSpotiFlac(input, outputPath);
+        const result = await this.runSpotiFlac(input, outputPath);
         return {
-            filePath: outputPath,
+            filePath: result.filePath,
             provider: "spotiflac",
-            stdout
+            stdout: result.stdout
         };
     }
 
-    private async runYtDlp(input: string, outputPath: string): Promise<string> {
+    private async runYtDlp(input: string, outputPath: string): Promise<{ stdout: string; filePath: string }> {
         const args = [
             "--no-warnings",
             "--no-playlist",
@@ -93,13 +93,17 @@ class BinaryDownloadService {
                 maxBuffer: 20 * 1024 * 1024,
                 env: buildExecEnv()
             });
-            return result.stdout;
+            const filePath = await this.resolveProducedFilePath(outputPath, "ytdlp");
+            return {
+                stdout: result.stdout,
+                filePath
+            };
         } catch (error) {
             throw new BinaryDownloadError("ytdlp", getExecErrorMessage(error));
         }
     }
 
-    private async runSpotiFlac(input: string, outputPath: string): Promise<string> {
+    private async runSpotiFlac(input: string, outputPath: string): Promise<{ stdout: string; filePath: string }> {
         const attempts = [
             ["download", "--output", outputPath, input],
             ["--output", outputPath, input]
@@ -115,13 +119,60 @@ class BinaryDownloadService {
                     maxBuffer: 20 * 1024 * 1024,
                     env: buildExecEnv()
                 });
-                return result.stdout;
+                const filePath = await this.resolveProducedFilePath(outputPath, "spotiflac");
+                return {
+                    stdout: result.stdout,
+                    filePath
+                };
             } catch (error) {
                 lastError = error;
             }
         }
 
         throw new BinaryDownloadError("spotiflac", getExecErrorMessage(lastError));
+    }
+
+    private async resolveProducedFilePath(outputPath: string, provider: DownloadProvider): Promise<string> {
+        const direct = await pathExistsAsFile(outputPath);
+        if (direct) {
+            return outputPath;
+        }
+
+        const dir = path.dirname(outputPath);
+        const baseName = path.basename(outputPath);
+        const entries = await fs.promises.readdir(dir, { withFileTypes: true });
+        const candidates = entries
+            .filter((entry) => entry.isFile() && entry.name.startsWith(`${baseName}.`))
+            .map((entry) => path.join(dir, entry.name));
+
+        if (candidates.length === 0) {
+            throw new BinaryDownloadError(
+                provider,
+                `Downloaded file was not found for requested output path: ${outputPath}`
+            );
+        }
+
+        const withStats: Array<{ filePath: string; mtimeMs: number }> = [];
+        for (const filePath of candidates) {
+            const stat = await fs.promises.stat(filePath).catch(() => null);
+            if (!stat || !stat.isFile()) {
+                continue;
+            }
+            withStats.push({
+                filePath,
+                mtimeMs: stat.mtimeMs
+            });
+        }
+
+        if (withStats.length === 0) {
+            throw new BinaryDownloadError(
+                provider,
+                `Downloaded file candidates are missing or invalid for output path: ${outputPath}`
+            );
+        }
+
+        withStats.sort((left, right) => right.mtimeMs - left.mtimeMs);
+        return withStats[0]!.filePath;
     }
 }
 
@@ -198,6 +249,14 @@ function getExecErrorMessage(error: unknown): string {
     if (stderr) return stderr;
     if (stdout) return stdout;
     return err.message ?? "Unknown process error.";
+}
+
+async function pathExistsAsFile(filePath: string): Promise<boolean> {
+    const stat = await fs.promises.stat(filePath).catch(() => null);
+    if (!stat) {
+        return false;
+    }
+    return stat.isFile();
 }
 
 export type {

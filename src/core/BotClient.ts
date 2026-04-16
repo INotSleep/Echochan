@@ -11,6 +11,9 @@ import { createCommands } from "../commands/index.js";
 import { MusicPlaybackService } from "../services/MusicPlaybackService.js";
 import { LocalResolverService } from "../services/LocalResolverService.js";
 import { BinaryDownloadService } from "../services/BinaryDownloadService.js";
+import { QueueService } from "../playback/QueueService.js";
+import { CacheManager } from "../playback/CacheManager.js";
+import { PlaybackCoordinator } from "../playback/PlaybackCoordinator.js";
 
 class BotClient {
     client: Client;
@@ -45,13 +48,31 @@ class BotClient {
         this.adapter = new DiscordClientAdapter(this.client);
         this.commands = new CommandRegistry(this.client, this.logger, this.storage, this.events, this.services, this.adapter);
         this.commands.attachInteractionListener();
-        this.services.register("music", new MusicPlaybackService(this.adapter, this.logger.child("Music")));
-        this.services.register("resolver", new LocalResolverService({
+        const music = new MusicPlaybackService(this.adapter, this.logger.child("Music"));
+        const resolver = new LocalResolverService({
             timeoutMs: parseInt(process.env.PROVIDER_TIMEOUT_MS || "15000", 10)
-        }));
-        this.services.register("downloader", new BinaryDownloadService({
+        });
+        const downloader = new BinaryDownloadService({
             timeoutMs: parseInt(process.env.PROVIDER_TIMEOUT_MS || "15000", 10)
-        }));
+        });
+        const queue = new QueueService(this.events, this.logger.child("Playback"));
+        const cache = new CacheManager(this.events, this.logger.child("Playback"));
+        const coordinator = new PlaybackCoordinator(
+            this.events,
+            this.logger.child("Playback"),
+            queue,
+            cache,
+            resolver,
+            downloader,
+            music
+        );
+
+        this.services.register("music", music);
+        this.services.register("resolver", resolver);
+        this.services.register("downloader", downloader);
+        this.services.register("queue", queue);
+        this.services.register("cache", cache);
+        this.services.register("coordinator", coordinator);
 
         this.registerCommands();
         this.registerEvents();

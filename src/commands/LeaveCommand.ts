@@ -1,5 +1,6 @@
 import type { Command } from "../core/Command.js";
 import { MusicPlaybackService } from "../services/MusicPlaybackService.js";
+import { PlaybackCoordinator } from "../playback/PlaybackCoordinator.js";
 
 class LeaveCommand implements Command {
     public readonly name = "leave";
@@ -17,6 +18,9 @@ class LeaveCommand implements Command {
             await interaction.editReply("Команда доступна только на сервере.");
             return;
         }
+
+        const coordinator = context.services.get<PlaybackCoordinator>("coordinator");
+        await coordinator.clear(interaction.guildId);
 
         const music = context.services.get<MusicPlaybackService>("music");
         const left = music.leave(interaction.guildId);
