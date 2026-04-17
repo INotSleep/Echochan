@@ -25,6 +25,7 @@ type QueueEntry = {
     input: string;
     inputType: QueueInputType;
     title: string | null;
+    artists: string[];
     durationMs: number | null;
     state: QueueEntryState;
     resolvedTrackId: string | null;

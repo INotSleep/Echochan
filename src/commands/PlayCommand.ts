@@ -49,7 +49,8 @@ class PlayCommand implements Command {
 
         const coordinator = context.services.get<PlaybackCoordinator>("coordinator");
         try {
-            music.joinChannel(channel);
+            const connection = music.joinChannel(channel);
+            const voiceReady = await music.waitUntilConnectionReady(connection, 12_000);
             const result = await coordinator.enqueue({
                 guildId: channel.guild.id,
                 requestedBy: interaction.user.id,
@@ -57,12 +58,31 @@ class PlayCommand implements Command {
                 requestId: interaction.id
             });
 
+            void coordinator.ensurePlayback(channel.guild.id);
+
+            const firstEntryId = result.entryIds[0] ?? null;
+            if (firstEntryId) {
+                await sleep(500);
+            }
+            const trackedEntry = firstEntryId
+                ? coordinator.getEntry(channel.guild.id, firstEntryId)
+                : null;
+            const statusLine = trackedEntry
+                ? `Статус: ${describeEntryState(trackedEntry.state)}`
+                : "Статус: добавлено в очередь.";
+            const artistLine = trackedEntry && trackedEntry.artists.length > 0
+                ? `Артист: ${trackedEntry.artists.join(", ")}.`
+                : "";
+            const positionLine = trackedEntry
+                ? `Позиция в очереди: ${trackedEntry.position + 1}.`
+                : "";
+            const voiceLine = voiceReady
+                ? ""
+                : " Голосовое соединение ещё поднимается, старт может занять немного времени.";
             const playlistNote = result.sourceType === "spotify_playlist"
                 ? ` Импортировано: **${result.addedCount}** треков${result.playlistTruncated ? " (обрезано лимитом)" : ""}.`
                 : "";
-            await interaction.editReply(`Добавил в очередь.${playlistNote}`);
-
-            void coordinator.ensurePlayback(channel.guild.id);
+            await interaction.editReply(`Добавил в очередь.${playlistNote} ${positionLine} ${statusLine} ${artistLine}${voiceLine}`.trim());
         } catch (error) {
             const message = error instanceof Error ? error.message : "Не удалось добавить трек в очередь.";
             await interaction.editReply(`Ошибка: ${message}`);
@@ -90,6 +110,24 @@ class PlayCommand implements Command {
             return null;
         }
     }
+}
+
+function describeEntryState(state: string): string {
+    if (state === "queued") return "в очереди";
+    if (state === "resolving_meta") return "загрузка метаданных...";
+    if (state === "resolved") return "метаданные готовы";
+    if (state === "warming") return "загрузка аудио...";
+    if (state === "ready") return "аудио готово к старту";
+    if (state === "playing") return "воспроизведение запущено";
+    if (state === "finished") return "завершено";
+    if (state === "failed") return "ошибка подготовки";
+    return state;
+}
+
+async function sleep(ms: number): Promise<void> {
+    await new Promise((resolve) => {
+        setTimeout(resolve, ms);
+    });
 }
 
 export {

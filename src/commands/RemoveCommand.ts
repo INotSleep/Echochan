@@ -1,6 +1,7 @@
 import { ApplicationCommandOptionType } from "discord.js";
 import type { Command } from "../core/Command.js";
 import { PlaybackCoordinator } from "../playback/PlaybackCoordinator.js";
+import type { QueueEntry } from "../playback/types.js";
 
 class RemoveCommand implements Command {
     public readonly name = "remove";
@@ -31,7 +32,8 @@ class RemoveCommand implements Command {
         const position = interaction.options.getInteger("position", true);
         const coordinator = context.services.get<PlaybackCoordinator>("coordinator");
         const queue = coordinator.getQueue(interaction.guildId);
-        const target = queue.entries[position - 1];
+        const visible = getVisibleQueueEntries(queue.entries, queue.currentIndex);
+        const target = visible[position - 1];
         if (!target) {
             await interaction.editReply(`Нет трека на позиции ${position}.`);
             return;
@@ -46,6 +48,20 @@ class RemoveCommand implements Command {
         const label = target.title ?? target.input;
         await interaction.editReply(`Удалил из очереди: ${position}. ${label}`);
     }
+}
+
+function getVisibleQueueEntries(entries: QueueEntry[], currentIndex: number | null): QueueEntry[] {
+    const currentStart = currentIndex ?? 0;
+    return entries
+        .filter((entry) => entry.state !== "finished")
+        .sort((left, right) => {
+            const leftCurrent = left.position === currentStart ? 0 : 1;
+            const rightCurrent = right.position === currentStart ? 0 : 1;
+            if (leftCurrent !== rightCurrent) {
+                return leftCurrent - rightCurrent;
+            }
+            return left.position - right.position;
+        });
 }
 
 export {

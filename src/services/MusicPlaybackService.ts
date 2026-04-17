@@ -1,4 +1,11 @@
-import { AudioPlayerStatus, NoSubscriberBehavior, type AudioPlayer, type VoiceConnection } from "@discordjs/voice";
+import {
+    AudioPlayerStatus,
+    NoSubscriberBehavior,
+    VoiceConnectionStatus,
+    entersState,
+    type AudioPlayer,
+    type VoiceConnection
+} from "@discordjs/voice";
 import type { ChatInputCommandInteraction, GuildMember, VoiceBasedChannel } from "discord.js";
 import type { DiscordClientAdapter } from "../core/DiscordClientAdapter.js";
 import type { Logger } from "../core/Logger.js";
@@ -38,7 +45,13 @@ class MusicPlaybackService {
         const existing = this.adapter.getVoiceConnection(channel.guild.id);
         if (existing) {
             const sameChannel = existing.joinConfig.channelId === channel.id;
-            if (sameChannel) {
+            const existingState = existing.state.status;
+            const isRecoverable =
+                existingState === VoiceConnectionStatus.Ready ||
+                existingState === VoiceConnectionStatus.Connecting ||
+                existingState === VoiceConnectionStatus.Signalling;
+
+            if (sameChannel && isRecoverable) {
                 return existing;
             }
 
@@ -46,6 +59,15 @@ class MusicPlaybackService {
         }
 
         return this.adapter.joinVoiceChannel(channel, false);
+    }
+
+    async waitUntilConnectionReady(connection: VoiceConnection, timeoutMs: number = 10_000): Promise<boolean> {
+        try {
+            await entersState(connection, VoiceConnectionStatus.Ready, timeoutMs);
+            return true;
+        } catch {
+            return false;
+        }
     }
 
     playSource(channel: VoiceBasedChannel, source: string): void {

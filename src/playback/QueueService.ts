@@ -17,6 +17,7 @@ type AddQueueEntryInput = {
     input: string;
     inputType: QueueInputType;
     title?: string | null;
+    artists?: string[];
     durationMs?: number | null;
     resolvedTrackId?: string | null;
     state?: QueueEntryState;
@@ -363,6 +364,7 @@ class QueueService {
             errorMessage?: string | null;
             resolvedTrackId?: string | null;
             title?: string | null;
+            artists?: string[];
             durationMs?: number | null;
         } = {}
     ): QueueEntry | null {
@@ -389,6 +391,9 @@ class QueueService {
         if (Object.prototype.hasOwnProperty.call(options, "title")) {
             entry.title = options.title ?? null;
         }
+        if (Object.prototype.hasOwnProperty.call(options, "artists")) {
+            entry.artists = options.artists ?? [];
+        }
         if (Object.prototype.hasOwnProperty.call(options, "durationMs")) {
             entry.durationMs = options.durationMs ?? null;
         }
@@ -404,12 +409,14 @@ class QueueService {
         resolvedTrackId: string,
         metadata: {
             title: string | null;
+            artists: string[];
             durationMs: number | null;
         }
     ): QueueEntry | null {
         return this.updateEntryState(guildId, entryId, "resolved", {
             resolvedTrackId,
             title: metadata.title,
+            artists: metadata.artists,
             durationMs: metadata.durationMs
         });
     }
@@ -443,6 +450,20 @@ class QueueService {
         }
 
         const current = state.entries[state.currentIndex] ?? null;
+        const finishedSnapshot = current ? this.cloneEntry(current) : null;
+        if (state.loopMode === "track" && current && current.state !== "failed") {
+            if (isStateTransitionAllowed(current.state, "ready")) {
+                current.state = "ready";
+                this.emitEntryUpdated(current);
+            }
+            state.playbackState = "idle";
+            this.bumpRevision(state);
+            return {
+                finished: finishedSnapshot,
+                next: this.cloneEntry(current)
+            };
+        }
+
         if (current && current.state !== "failed" && isStateTransitionAllowed(current.state, "finished")) {
             current.state = "finished";
             this.emitEntryUpdated(current);
@@ -450,10 +471,27 @@ class QueueService {
 
         const nextIndex = this.computeNextIndex(state, false);
         if (nextIndex === null) {
+            if (state.loopMode === "queue") {
+                const resetCount = this.resetFinishedEntriesForQueueLoop(state);
+                if (resetCount > 0) {
+                    const wrappedIndex = this.findFirstPlayableIndex(state);
+                    if (wrappedIndex !== null) {
+                        state.currentIndex = wrappedIndex;
+                        state.playbackState = "idle";
+                        this.bumpRevision(state);
+                        const wrapped = state.entries[wrappedIndex] ?? null;
+                        return {
+                            finished: finishedSnapshot,
+                            next: wrapped ? this.cloneEntry(wrapped) : null
+                        };
+                    }
+                }
+            }
+
             state.currentIndex = null;
             state.playbackState = "idle";
             this.bumpRevision(state);
-            return { finished: current ? this.cloneEntry(current) : null, next: null };
+            return { finished: finishedSnapshot, next: null };
         }
 
         state.currentIndex = nextIndex;
@@ -462,7 +500,7 @@ class QueueService {
         const next = state.entries[nextIndex] ?? null;
 
         return {
-            finished: current ? this.cloneEntry(current) : null,
+            finished: finishedSnapshot,
             next: next ? this.cloneEntry(next) : null
         };
     }
@@ -533,6 +571,19 @@ class QueueService {
         return null;
     }
 
+    private resetFinishedEntriesForQueueLoop(state: GuildQueueState): number {
+        let changed = 0;
+        for (const entry of state.entries) {
+            if (entry.state !== "finished") {
+                continue;
+            }
+            entry.state = "ready";
+            this.emitEntryUpdated(entry);
+            changed += 1;
+        }
+        return changed;
+    }
+
     private createEntry(state: GuildQueueState, input: AddQueueEntryInput): QueueEntry {
         const now = new Date().toISOString();
         return {
@@ -542,6 +593,7 @@ class QueueService {
             input: input.input,
             inputType: input.inputType,
             title: input.title ?? null,
+            artists: input.artists ?? [],
             durationMs: input.durationMs ?? null,
             state: input.state ?? "queued",
             resolvedTrackId: input.resolvedTrackId ?? null,
@@ -650,7 +702,7 @@ const STATE_TRANSITIONS: Record<QueueEntryState, Set<QueueEntryState>> = {
     resolved: new Set(["warming", "ready", "playing", "failed"]),
     warming: new Set(["ready", "failed"]),
     ready: new Set(["playing", "failed"]),
-    playing: new Set(["finished", "failed"]),
+    playing: new Set(["ready", "finished", "failed"]),
     finished: new Set([]),
     failed: new Set([])
 };

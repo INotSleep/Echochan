@@ -22,6 +22,14 @@ class JoinCommand implements Command {
         }
 
         const connection = music.joinChannel(channel);
+        const isReady = await music.waitUntilConnectionReady(connection, 12_000);
+        if (!isReady) {
+            await interaction.editReply(
+                `Пробую подключиться к **${channel.name}**, но соединение ещё не готово (status: ${connection.state.status}).`
+            );
+            return;
+        }
+
         await interaction.editReply(`Подключился к **${channel.name}** (status: ${connection.state.status}).`);
     }
 }

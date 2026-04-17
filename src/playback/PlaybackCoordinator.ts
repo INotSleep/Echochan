@@ -34,6 +34,7 @@ type EnqueueResult = {
     addedCount: number;
     playlistTruncated: boolean;
     sourceType: SourceType;
+    entryIds: string[];
 };
 
 type PlaybackSource = {
@@ -111,11 +112,12 @@ class PlaybackCoordinator {
             return result;
         }
 
-        this.queue.add({
+        const added = this.queue.add({
             guildId: input.guildId,
             requestedBy: input.requestedBy,
             input: normalizedInput,
             inputType: mapSourceTypeToQueueInputType(detected),
+            artists: [],
             state: "queued"
         });
 
@@ -123,7 +125,8 @@ class PlaybackCoordinator {
         return {
             addedCount: 1,
             playlistTruncated: false,
-            sourceType: detected
+            sourceType: detected,
+            entryIds: [added.id]
         };
     }
 
@@ -234,6 +237,10 @@ class PlaybackCoordinator {
 
     public getQueue(guildId: string): GuildQueueState {
         return this.queue.getQueue(guildId);
+    }
+
+    public getEntry(guildId: string, entryId: string): QueueEntry | null {
+        return this.queue.findEntry(guildId, entryId);
     }
 
     private async orchestrate(guildId: string): Promise<void> {
@@ -393,6 +400,7 @@ class PlaybackCoordinator {
             this.resolvedTracksById.set(normalized.id, normalized);
             this.queue.setEntryResolvedTrack(guildId, entry.id, normalized.id, {
                 title: normalized.title,
+                artists: normalized.artists,
                 durationMs: normalized.durationMs
             });
 
@@ -765,30 +773,34 @@ class PlaybackCoordinator {
             input: inferExpandedTrackInput(entry, input.input),
             inputType: inferExpandedTrackInputType(entry),
             title: entry.title ?? null,
+            artists: entry.artists ?? [],
             durationMs: entry.durationMs ?? null,
             state: "queued"
         }));
 
         if (addInputs.length === 0) {
-            this.queue.add({
+            const single = this.queue.add({
                 guildId: input.guildId,
                 requestedBy: input.requestedBy,
                 input: input.input,
                 inputType: "spotify_playlist",
+                artists: [],
                 state: "queued"
             });
             return {
                 addedCount: 1,
                 playlistTruncated: false,
-                sourceType: "spotify_playlist"
+                sourceType: "spotify_playlist",
+                entryIds: [single.id]
             };
         }
 
-        this.queue.addMany(addInputs);
+        const created = this.queue.addMany(addInputs);
         return {
             addedCount: addInputs.length,
             playlistTruncated: resolveResult.entries.length > addInputs.length,
-            sourceType: "spotify_playlist"
+            sourceType: "spotify_playlist",
+            entryIds: created.map((entry) => entry.id)
         };
     }
 
