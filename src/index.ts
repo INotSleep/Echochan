@@ -3,8 +3,7 @@ import process from 'node:process';
 
 const runtimeBinaryDirs = [
     path.resolve(process.cwd(), process.env.FFMPEG_INSTALL_DIR || '.ffmpeg'),
-    path.resolve(process.cwd(), process.env.YTDLP_INSTALL_DIR || '.yt-dlp'),
-    path.resolve(process.cwd(), process.env.SPOTIFLAC_INSTALL_DIR || '.spotiflac')
+    path.resolve(process.cwd(), process.env.YTDLP_INSTALL_DIR || '.yt-dlp')
 ];
 process.env.PATH = `${runtimeBinaryDirs.join(path.delimiter)}${path.delimiter}${process.env.PATH ?? ''}`;
 

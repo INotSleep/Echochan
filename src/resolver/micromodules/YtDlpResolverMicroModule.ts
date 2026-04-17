@@ -26,7 +26,12 @@ class YtDlpResolverMicroModule implements ResolverMicroModule {
     }
 
     public canResolve(sourceType: SourceType): boolean {
-        return sourceType !== "spotify_track" && sourceType !== "spotify_album" && sourceType !== "spotify_playlist";
+        return sourceType === "spotify_track"
+            || sourceType === "spotify_album"
+            || sourceType === "spotify_playlist"
+            || sourceType === "youtube"
+            || sourceType === "direct_url"
+            || sourceType === "unknown";
     }
 
     public async resolveByInput(context: ResolveModuleContext): Promise<ResolvedEntry[]> {
@@ -71,7 +76,7 @@ class YtDlpResolverMicroModule implements ResolverMicroModule {
                 canonicalId: canonical,
                 candidates: [
                     this.buildStreamCandidate(entryId, context, rawObj, streamUrl),
-                    this.buildDownloadCandidate(entryId, rawObj, streamUrl)
+                    this.buildDownloadCandidate(entryId, rawObj, context.input)
                 ]
             });
         }
@@ -113,16 +118,21 @@ class YtDlpResolverMicroModule implements ResolverMicroModule {
     private buildDownloadCandidate(
         entryId: string,
         rawObj: Record<string, unknown>,
-        streamUrl: string | null
+        contextInput: string
     ): ResolveCandidate {
+        const sourceUrl = readString(rawObj.webpage_url)
+            ?? readString(rawObj.original_url)
+            ?? contextInput;
+
         return {
             id: stableId("candidate", `${entryId}:ytdlp:download`),
             provider: "ytdlp",
             kind: "download",
             quality: "lossy",
-            url: streamUrl,
+            url: sourceUrl,
             metadata: {
-                extractor: rawObj.extractor ?? null
+                extractor: rawObj.extractor ?? null,
+                ext: "mp3"
             }
         };
     }

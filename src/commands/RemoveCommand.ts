@@ -1,7 +1,7 @@
 import { ApplicationCommandOptionType } from "discord.js";
 import type { Command } from "../core/Command.js";
 import { PlaybackCoordinator } from "../playback/PlaybackCoordinator.js";
-import type { QueueEntry } from "../playback/types.js";
+import { buildNoticeReply, buildQueuePanelReply, getVisibleQueueEntries } from "./ui/EchochanUi.js";
 
 class RemoveCommand implements Command {
     public readonly name = "remove";
@@ -25,7 +25,11 @@ class RemoveCommand implements Command {
         context: Parameters<Command["execute"]>[1]
     ): Promise<void> {
         if (!interaction.inGuild()) {
-            await interaction.editReply("Команда доступна только на сервере.");
+            await interaction.editReply(buildNoticeReply(interaction, {
+                title: "Команда недоступна",
+                description: "Команда работает только внутри сервера.",
+                tone: "warning"
+            }));
             return;
         }
 
@@ -35,33 +39,36 @@ class RemoveCommand implements Command {
         const visible = getVisibleQueueEntries(queue.entries, queue.currentIndex);
         const target = visible[position - 1];
         if (!target) {
-            await interaction.editReply(`Нет трека на позиции ${position}.`);
+            await interaction.editReply(buildQueuePanelReply(interaction, queue, {
+                title: "Remove не выполнен",
+                note: `Позиция ${position} не найдена в видимой очереди.`,
+                tone: "warning",
+                limit: 8
+            }));
             return;
         }
 
         const removed = coordinator.remove(interaction.guildId, target.id);
         if (!removed) {
-            await interaction.editReply("Не удалось удалить элемент очереди.");
+            const updatedQueue = coordinator.getQueue(interaction.guildId);
+            await interaction.editReply(buildQueuePanelReply(interaction, updatedQueue, {
+                title: "Remove не выполнен",
+                note: "Не удалось удалить элемент очереди.",
+                tone: "warning",
+                limit: 8
+            }));
             return;
         }
 
+        const updatedQueue = coordinator.getQueue(interaction.guildId);
         const label = target.title ?? target.input;
-        await interaction.editReply(`Удалил из очереди: ${position}. ${label}`);
+        await interaction.editReply(buildQueuePanelReply(interaction, updatedQueue, {
+            title: "Remove выполнен",
+            note: `Удалила из очереди позицию ${position}: ${label}`,
+            tone: "success",
+            limit: 8
+        }));
     }
-}
-
-function getVisibleQueueEntries(entries: QueueEntry[], currentIndex: number | null): QueueEntry[] {
-    const currentStart = currentIndex ?? 0;
-    return entries
-        .filter((entry) => entry.state !== "finished")
-        .sort((left, right) => {
-            const leftCurrent = left.position === currentStart ? 0 : 1;
-            const rightCurrent = right.position === currentStart ? 0 : 1;
-            if (leftCurrent !== rightCurrent) {
-                return leftCurrent - rightCurrent;
-            }
-            return left.position - right.position;
-        });
 }
 
 export {

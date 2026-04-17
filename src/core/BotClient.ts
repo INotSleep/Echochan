@@ -16,6 +16,7 @@ import { CacheManager } from "../playback/CacheManager.js";
 import { PlaybackCoordinator } from "../playback/PlaybackCoordinator.js";
 import { CacheMaintenanceModule } from "../modules/CacheMaintenanceModule.js";
 import { PlaybackDiagnosticsModule } from "../modules/PlaybackDiagnosticsModule.js";
+import { EchochanUiModule } from "../modules/EchochanUiModule.js";
 
 class BotClient {
     client: Client;
@@ -120,6 +121,7 @@ class BotClient {
     registerModules() {
         this.registerModule(CacheMaintenanceModule);
         this.registerModule(PlaybackDiagnosticsModule);
+        this.registerModule(EchochanUiModule);
     }
 
     registerCommands() {

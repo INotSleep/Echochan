@@ -1,7 +1,6 @@
 import process from 'node:process';
 import { ensureFfmpeg } from './installffmpeg.mjs';
 import { ensureYtDlp } from './installytdlp.mjs';
-import { ensureSpotiFlac } from './installspotiflac.mjs';
 
 async function main() {
     const force = process.argv.includes('--force');
@@ -12,9 +11,6 @@ async function main() {
 
     const ytdlp = await ensureYtDlp({ force });
     console.log(`yt-dlp:     ${ytdlp.binaryPath}`);
-
-    const spotiflac = await ensureSpotiFlac({ force });
-    console.log(`spotiflac:  ${spotiflac.binaryPath}`);
 }
 
 main().catch((error) => {

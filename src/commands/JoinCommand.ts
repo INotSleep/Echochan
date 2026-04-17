@@ -1,4 +1,5 @@
 import type { Command } from "../core/Command.js";
+import { buildNoticeReply } from "./ui/EchochanUi.js";
 import { MusicPlaybackService } from "../services/MusicPlaybackService.js";
 
 class JoinCommand implements Command {
@@ -17,20 +18,30 @@ class JoinCommand implements Command {
         const channel = music.getMemberVoiceChannel(interaction);
 
         if (!channel) {
-            await interaction.editReply("Сначала зайдите в голосовой канал.");
+            await interaction.editReply(buildNoticeReply(interaction, {
+                title: "Нужен голосовой канал",
+                description: "Сначала зайди в голосовой канал, и я подключусь к тебе.",
+                tone: "warning"
+            }));
             return;
         }
 
         const connection = music.joinChannel(channel);
         const isReady = await music.waitUntilConnectionReady(connection, 12_000);
         if (!isReady) {
-            await interaction.editReply(
-                `Пробую подключиться к **${channel.name}**, но соединение ещё не готово (status: ${connection.state.status}).`
-            );
+            await interaction.editReply(buildNoticeReply(interaction, {
+                title: "Подключение в процессе",
+                description: `Поднимаю соединение с **${channel.name}**. Текущий статус: ${connection.state.status}.`,
+                tone: "info"
+            }));
             return;
         }
 
-        await interaction.editReply(`Подключился к **${channel.name}** (status: ${connection.state.status}).`);
+        await interaction.editReply(buildNoticeReply(interaction, {
+            title: "Подключение готово",
+            description: `Я в канале **${channel.name}**. Статус: ${connection.state.status}.`,
+            tone: "success"
+        }));
     }
 }
 

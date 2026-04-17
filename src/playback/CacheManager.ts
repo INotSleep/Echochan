@@ -6,7 +6,7 @@ import type { Events as EchochanEvents } from "../core/Events.js";
 import type { Logger } from "../core/Logger.js";
 import type { CacheAsset } from "./types.js";
 
-type CacheProducer = "spotiflac" | "ytdlp";
+type CacheProducer = "spotify" | "ytdlp";
 
 type CacheManagerOptions = {
     cacheDir?: string;

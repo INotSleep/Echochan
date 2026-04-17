@@ -1,7 +1,7 @@
 import { ApplicationCommandOptionType } from "discord.js";
 import type { Command } from "../core/Command.js";
 import { PlaybackCoordinator } from "../playback/PlaybackCoordinator.js";
-import type { QueueEntry } from "../playback/types.js";
+import { buildNoticeReply, buildQueuePanelReply, getVisibleQueueEntries } from "./ui/EchochanUi.js";
 
 class MoveCommand implements Command {
     public readonly name = "move";
@@ -32,7 +32,11 @@ class MoveCommand implements Command {
         context: Parameters<Command["execute"]>[1]
     ): Promise<void> {
         if (!interaction.inGuild()) {
-            await interaction.editReply("Команда доступна только на сервере.");
+            await interaction.editReply(buildNoticeReply(interaction, {
+                title: "Команда недоступна",
+                description: "Команда работает только внутри сервера.",
+                tone: "warning"
+            }));
             return;
         }
 
@@ -44,32 +48,35 @@ class MoveCommand implements Command {
         const fromEntry = visible[from - 1];
         const toEntry = visible[to - 1];
         if (!fromEntry || !toEntry) {
-            await interaction.editReply("Не удалось переместить элемент. Проверь позиции.");
+            await interaction.editReply(buildQueuePanelReply(interaction, queue, {
+                title: "Move не выполнен",
+                note: "Проверь позиции: одна из них выходит за границы очереди.",
+                tone: "warning",
+                limit: 8
+            }));
             return;
         }
 
         const moved = coordinator.move(interaction.guildId, fromEntry.position, toEntry.position);
         if (!moved) {
-            await interaction.editReply("Не удалось переместить элемент. Проверь позиции.");
+            const updatedQueue = coordinator.getQueue(interaction.guildId);
+            await interaction.editReply(buildQueuePanelReply(interaction, updatedQueue, {
+                title: "Move не выполнен",
+                note: "Не удалось переместить элемент. Проверь позиции и попробуй ещё раз.",
+                tone: "warning",
+                limit: 8
+            }));
             return;
         }
 
-        await interaction.editReply(`Переместил элемент с ${from} на ${to}.`);
+        const updatedQueue = coordinator.getQueue(interaction.guildId);
+        await interaction.editReply(buildQueuePanelReply(interaction, updatedQueue, {
+            title: "Move выполнен",
+            note: `Переместила трек с позиции ${from} на ${to}.`,
+            tone: "success",
+            limit: 8
+        }));
     }
-}
-
-function getVisibleQueueEntries(entries: QueueEntry[], currentIndex: number | null): QueueEntry[] {
-    const currentStart = currentIndex ?? 0;
-    return entries
-        .filter((entry) => entry.state !== "finished")
-        .sort((left, right) => {
-            const leftCurrent = left.position === currentStart ? 0 : 1;
-            const rightCurrent = right.position === currentStart ? 0 : 1;
-            if (leftCurrent !== rightCurrent) {
-                return leftCurrent - rightCurrent;
-            }
-            return left.position - right.position;
-        });
 }
 
 export {

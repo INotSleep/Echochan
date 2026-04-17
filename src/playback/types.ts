@@ -69,7 +69,7 @@ type CacheAsset = {
     format: string;
     sizeBytes: number;
     state: CacheAssetState;
-    producer: "spotiflac" | "ytdlp";
+    producer: "spotify" | "ytdlp";
     lastAccessAt: string;
     refCount: number;
     expiresAt: string | null;

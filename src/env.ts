@@ -11,10 +11,11 @@ declare global {
             PROVIDER_TIMEOUT_MS: string;
             DOWNLOAD_TIMEOUT_MS: string;
             YTDLP_BIN: string;
-            SPOTIFLAC_BIN: string;
             FFMPEG_INSTALL_DIR: string;
             YTDLP_INSTALL_DIR: string;
-            SPOTIFLAC_INSTALL_DIR: string;
+            SPOTIFY_ACCESS_TOKEN: string;
+            SPOTIFY_CLIENT_ID: string;
+            SPOTIFY_CLIENT_SECRET: string;
 
             POSTGRES_PASSWORD: string;
             POSTGRES_USER: string;

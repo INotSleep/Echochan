@@ -5,6 +5,7 @@ import { JoinCommand } from "./JoinCommand.js";
 import { LeaveCommand } from "./LeaveCommand.js";
 import { LoopCommand } from "./LoopCommand.js";
 import { MoveCommand } from "./MoveCommand.js";
+import { NowPlayingCommand } from "./NowPlayingCommand.js";
 import { PauseCommand } from "./PauseCommand.js";
 import { PingCommand } from "./PingCommand.js";
 import { PlayCommand } from "./PlayCommand.js";
@@ -21,6 +22,7 @@ const commandConstructors: CommandConstructor[] = [
     PingCommand,
     JoinCommand,
     PlayCommand,
+    NowPlayingCommand,
     QueueCommand,
     MoveCommand,
     RemoveCommand,

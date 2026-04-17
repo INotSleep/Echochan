@@ -2,6 +2,7 @@ import { ApplicationCommandOptionType } from "discord.js";
 import { access } from "node:fs/promises";
 import path from "node:path";
 import type { Command } from "../core/Command.js";
+import { buildNoticeReply, buildQueuePanelReply } from "./ui/EchochanUi.js";
 import { MusicPlaybackService } from "../services/MusicPlaybackService.js";
 import { PlaybackCoordinator } from "../playback/PlaybackCoordinator.js";
 
@@ -29,7 +30,11 @@ class PlayCommand implements Command {
         const channel = music.getMemberVoiceChannel(interaction);
 
         if (!channel) {
-            await interaction.editReply("Нужно быть в голосовом канале, чтобы включить музыку.");
+            await interaction.editReply(buildNoticeReply(interaction, {
+                title: "Нужен голосовой канал",
+                description: "Зайди в голосовой канал, и я сразу начну подготовку трека.",
+                tone: "warning"
+            }));
             return;
         }
 
@@ -40,7 +45,11 @@ class PlayCommand implements Command {
             try {
                 await access(localPath);
                 music.playSource(channel, localPath);
-                await interaction.editReply(`Воспроизвожу локальный файл \`${input}\` в **${channel.name}**.`);
+                await interaction.editReply(buildNoticeReply(interaction, {
+                    title: "Локальный файл запущен",
+                    description: `Запускаю \`${input}\` в канале **${channel.name}**.`,
+                    tone: "success"
+                }));
                 return;
             } catch {
                 // fall through: if local file does not exist, try resolver as URL/query input.
@@ -79,13 +88,22 @@ class PlayCommand implements Command {
             const voiceLine = voiceReady
                 ? ""
                 : " Голосовое соединение ещё поднимается, старт может занять немного времени.";
-            const playlistNote = result.sourceType === "spotify_playlist"
+            const playlistNote = result.sourceType === "spotify_playlist" || result.sourceType === "spotify_album"
                 ? ` Импортировано: **${result.addedCount}** треков${result.playlistTruncated ? " (обрезано лимитом)" : ""}.`
                 : "";
-            await interaction.editReply(`Добавил в очередь.${playlistNote} ${positionLine} ${statusLine} ${artistLine}${voiceLine}`.trim());
+            const queue = coordinator.getQueue(channel.guild.id);
+            await interaction.editReply(buildQueuePanelReply(interaction, queue, {
+                title: "Трек добавлен",
+                note: `Добавила в очередь.${playlistNote} ${positionLine} ${statusLine} ${artistLine}${voiceLine}`.trim(),
+                tone: "success"
+            }));
         } catch (error) {
             const message = error instanceof Error ? error.message : "Не удалось добавить трек в очередь.";
-            await interaction.editReply(`Ошибка: ${message}`);
+            await interaction.editReply(buildNoticeReply(interaction, {
+                title: "Не удалось добавить трек",
+                description: message,
+                tone: "error"
+            }));
         }
     }
 

@@ -1,6 +1,7 @@
 import type { Command } from "../core/Command.js";
 import { MusicPlaybackService } from "../services/MusicPlaybackService.js";
 import { PlaybackCoordinator } from "../playback/PlaybackCoordinator.js";
+import { buildNoticeReply, buildQueuePanelReply } from "./ui/EchochanUi.js";
 
 class LeaveCommand implements Command {
     public readonly name = "leave";
@@ -15,7 +16,11 @@ class LeaveCommand implements Command {
         context: Parameters<Command["execute"]>[1]
     ): Promise<void> {
         if (!interaction.inGuild()) {
-            await interaction.editReply("Команда доступна только на сервере.");
+            await interaction.editReply(buildNoticeReply(interaction, {
+                title: "Команда недоступна",
+                description: "Команда работает только внутри сервера.",
+                tone: "warning"
+            }));
             return;
         }
 
@@ -25,11 +30,23 @@ class LeaveCommand implements Command {
         const music = context.services.get<MusicPlaybackService>("music");
         const left = music.leave(interaction.guildId);
         if (!left) {
-            await interaction.editReply("Я не подключён к голосовому каналу.");
+            const queue = coordinator.getQueue(interaction.guildId);
+            await interaction.editReply(buildQueuePanelReply(interaction, queue, {
+                title: "Уже отключена",
+                note: "Я уже не была подключена к голосовому каналу.",
+                tone: "warning",
+                limit: 6
+            }));
             return;
         }
 
-        await interaction.editReply("Отключился от голосового канала.");
+        const queue = coordinator.getQueue(interaction.guildId);
+        await interaction.editReply(buildQueuePanelReply(interaction, queue, {
+            title: "Голосовой канал покинут",
+            note: "Отключилась от канала и очистила очередь.",
+            tone: "success",
+            limit: 6
+        }));
     }
 }
 

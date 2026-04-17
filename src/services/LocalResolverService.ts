@@ -29,20 +29,17 @@ class LocalResolverError extends Error {
 type LocalResolverOptions = {
     timeoutMs?: number;
     ytdlpBinary?: string;
-    spotiflacBinary?: string;
     microModules?: ResolverMicroModule[];
 };
 
 class LocalResolverService implements ResolverClient {
     private readonly timeoutMs: number;
     private readonly ytdlpBinary: string;
-    private readonly spotiflacBinary: string;
     private readonly microModules: ResolverMicroModule[];
 
     constructor(options: LocalResolverOptions = {}) {
         this.timeoutMs = options.timeoutMs ?? parseInt(process.env.PROVIDER_TIMEOUT_MS || "15000", 10);
         this.ytdlpBinary = options.ytdlpBinary ?? resolveBinary("YTDLP_BIN", ".yt-dlp", "yt-dlp");
-        this.spotiflacBinary = options.spotiflacBinary ?? resolveBinary("SPOTIFLAC_BIN", ".spotiflac", "spotiflac");
         this.microModules = options.microModules ?? this.createDefaultMicroModules();
     }
 
@@ -109,7 +106,7 @@ class LocalResolverService implements ResolverClient {
             return modules.sort((left, right) => (left.id === "ytdlp" ? -1 : right.id === "ytdlp" ? 1 : 0));
         }
 
-        return modules.sort((left, right) => (left.id === "spotiflac" ? -1 : right.id === "spotiflac" ? 1 : 0));
+        return modules.sort((left, right) => (left.id === "spotify" ? -1 : right.id === "spotify" ? 1 : 0));
     }
 
     private async runBinary(binary: string, args: string[]): Promise<string> {
@@ -190,8 +187,7 @@ function getExeName(baseName: string): string {
 function buildExecEnv(): NodeJS.ProcessEnv {
     const runtimeBinaryDirs = [
         path.resolve(process.cwd(), process.env.FFMPEG_INSTALL_DIR || ".ffmpeg"),
-        path.resolve(process.cwd(), process.env.YTDLP_INSTALL_DIR || ".yt-dlp"),
-        path.resolve(process.cwd(), process.env.SPOTIFLAC_INSTALL_DIR || ".spotiflac")
+        path.resolve(process.cwd(), process.env.YTDLP_INSTALL_DIR || ".yt-dlp")
     ];
 
     const currentPath = process.env.PATH ?? process.env.Path ?? "";

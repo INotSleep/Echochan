@@ -12,7 +12,7 @@ type SourceType =
     | "direct_url"
     | "unknown";
 
-type ResolveProvider = "spotiflac" | "ytdlp";
+type ResolveProvider = "spotify" | "ytdlp";
 type ResolveKind = "stream" | "download";
 type ResolveQuality = "lossless" | "lossy" | "unknown";
 

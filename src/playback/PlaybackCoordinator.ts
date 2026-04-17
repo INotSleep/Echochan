@@ -44,8 +44,14 @@ type PlaybackSource = {
 
 type PrefetchJob = {
     guildId: string;
-    entryId: string;
+    entryIds: string[];
     jobId: string;
+};
+
+type PlaybackClockState = {
+    startedAtMs: number;
+    pausedAtMs: number | null;
+    pausedTotalMs: number;
 };
 
 class PlaybackCoordinator {
@@ -65,6 +71,7 @@ class PlaybackCoordinator {
     private readonly activeAssetByGuild = new Map<string, string>();
     private readonly resolveInFlight = new Map<string, Promise<ResolvedTrack | null>>();
     private readonly warmInFlightByCacheKey = new Map<string, Promise<CacheAsset | null>>();
+    private readonly playbackClockByGuild = new Map<string, PlaybackClockState>();
 
     constructor(
         events: EventBus<EchochanEvents>,
@@ -103,7 +110,7 @@ class PlaybackCoordinator {
         }
 
         const detected = detectSourceType(normalizedInput);
-        if (detected === "spotify_playlist") {
+        if (detected === "spotify_playlist" || detected === "spotify_album") {
             const result = await this.expandPlaylist({
                 ...input,
                 input: normalizedInput
@@ -112,20 +119,53 @@ class PlaybackCoordinator {
             return result;
         }
 
+        const resolvePayload = {
+            input: normalizedInput,
+            requestedBy: input.requestedBy,
+            ...(input.requestId ? { requestId: input.requestId } : {})
+        };
+        const resolveResult = await this.resolveLimiter.run(() => this.resolver.resolve(resolvePayload));
+        const first = resolveResult.entries[0];
+        if (!first) {
+            throw new Error("Не удалось получить метаданные трека.");
+        }
+
+        const resolvedInput = inferExpandedTrackInput(first, normalizedInput);
+        const resolvedInputType = inferExpandedTrackInputType(first);
+        const inputType = resolvedInputType ?? mapSourceTypeToQueueInputType(detected);
+        const title = first.title ?? deriveQueueTitle(resolvedInput, detected);
+        const artists = first.artists ?? [];
+        const durationMs = first.durationMs ?? null;
+
         const added = this.queue.add({
             guildId: input.guildId,
             requestedBy: input.requestedBy,
-            input: normalizedInput,
-            inputType: mapSourceTypeToQueueInputType(detected),
-            artists: [],
-            state: "queued"
+            input: resolvedInput,
+            inputType,
+            title,
+            artists,
+            durationMs,
+            state: "resolved"
+        });
+
+        const normalizedTrack = this.toResolvedTrack(added, first);
+        this.resolvedTracksById.set(normalizedTrack.id, normalizedTrack);
+        this.queue.setEntryResolvedTrack(input.guildId, added.id, normalizedTrack.id, {
+            title: normalizedTrack.title,
+            artists: normalizedTrack.artists,
+            durationMs: normalizedTrack.durationMs
+        });
+
+        void this.events.emit("track_resolved", {
+            guildId: input.guildId,
+            entryId: added.id
         });
 
         void this.ensurePlayback(input.guildId);
         return {
             addedCount: 1,
             playlistTruncated: false,
-            sourceType: detected,
+            sourceType: resolveResult.sourceType,
             entryIds: [added.id]
         };
     }
@@ -145,6 +185,7 @@ class PlaybackCoordinator {
 
             this.music.stop(guildId);
             this.releaseGuildAsset(guildId);
+            this.clearPlaybackClock(guildId);
             this.cancelPrefetch(guildId);
 
             if (current.state === "playing") {
@@ -163,6 +204,7 @@ class PlaybackCoordinator {
         await this.runSerialized(guildId, async () => {
             this.music.stop(guildId);
             this.releaseGuildAsset(guildId);
+            this.clearPlaybackClock(guildId);
             this.cancelPrefetch(guildId);
             this.queue.stop(guildId);
             if (clearQueue) {
@@ -179,6 +221,7 @@ class PlaybackCoordinator {
         const paused = this.music.pause(guildId);
         if (paused) {
             this.queue.pause(guildId);
+            this.markPlaybackPaused(guildId);
         }
         return paused;
     }
@@ -191,6 +234,7 @@ class PlaybackCoordinator {
         const resumed = this.music.resume(guildId);
         if (resumed) {
             this.queue.resume(guildId);
+            this.markPlaybackResumed(guildId);
         }
         return resumed;
     }
@@ -241,6 +285,17 @@ class PlaybackCoordinator {
 
     public getEntry(guildId: string, entryId: string): QueueEntry | null {
         return this.queue.findEntry(guildId, entryId);
+    }
+
+    public getPlaybackProgressMs(guildId: string): number | null {
+        const clock = this.playbackClockByGuild.get(guildId);
+        if (!clock) {
+            return null;
+        }
+
+        const nowMs = clock.pausedAtMs ?? Date.now();
+        const elapsed = nowMs - clock.startedAtMs - clock.pausedTotalMs;
+        return Math.max(0, elapsed);
     }
 
     private async orchestrate(guildId: string): Promise<void> {
@@ -299,6 +354,7 @@ class PlaybackCoordinator {
         }
 
         this.assignGuildAsset(guildId, source.cacheKey);
+        this.startPlaybackClock(guildId);
         void this.events.emit("track_started", {
             guildId,
             entryId: playing.id
@@ -423,7 +479,7 @@ class PlaybackCoordinator {
         track: ResolvedTrack,
         candidate: ResolveCandidate
     ): Promise<CacheAsset | null> {
-        if (candidate.kind !== "download") {
+        if (candidate.kind !== "download" || candidate.provider !== "ytdlp") {
             return null;
         }
 
@@ -465,10 +521,11 @@ class PlaybackCoordinator {
                 const input = candidate.url ?? track.originalUrl;
 
                 const downloadResult = await this.downloader.downloadToFile({
-                    provider: candidate.provider,
+                    provider: "ytdlp",
                     input,
                     outputDir,
-                    fileName
+                    fileName,
+                    metadata: candidate.metadata
                 });
 
                 if (downloadResult.filePath !== reserved.tempPath) {
@@ -516,14 +573,14 @@ class PlaybackCoordinator {
     }
 
     private ensurePrefetch(guildId: string): void {
-        const next = this.queue.getNextEntry(guildId);
-        if (!next) {
+        const targets = this.getPrefetchTargets(guildId, 2);
+        if (targets.length === 0) {
             this.cancelPrefetch(guildId);
             return;
         }
 
         const existing = this.prefetchJobs.get(guildId);
-        if (existing && existing.entryId === next.id) {
+        if (existing && areEqualEntryLists(existing.entryIds, targets)) {
             return;
         }
 
@@ -531,16 +588,21 @@ class PlaybackCoordinator {
 
         const job: PrefetchJob = {
             guildId,
-            entryId: next.id,
+            entryIds: targets,
             jobId: randomUUID()
         };
         this.prefetchJobs.set(guildId, job);
         this.queue.setActiveWarmJob(guildId, job.jobId);
 
+        const primaryTarget = targets[0];
+        if (!primaryTarget) {
+            return;
+        }
+
         void this.events.emit("prefetch_started", {
             guildId,
             jobId: job.jobId,
-            entryId: job.entryId
+            entryId: primaryTarget
         });
 
         void this.runPrefetchJob(job);
@@ -558,49 +620,50 @@ class PlaybackCoordinator {
         void this.events.emit("prefetch_cancelled", {
             guildId,
             jobId: active.jobId,
-            entryId: active.entryId
+            entryId: active.entryIds[0] ?? ""
         });
     }
 
     private async runPrefetchJob(job: PrefetchJob): Promise<void> {
         try {
-            const stillActive = this.prefetchJobs.get(job.guildId);
-            if (!stillActive || stillActive.jobId !== job.jobId) {
-                return;
-            }
+            for (const entryId of job.entryIds) {
+                const stillActive = this.prefetchJobs.get(job.guildId);
+                if (!stillActive || stillActive.jobId !== job.jobId) {
+                    return;
+                }
 
-            if (!this.isEntryCurrentOrNext(job.guildId, job.entryId)) {
-                this.cancelPrefetch(job.guildId);
-                return;
-            }
+                if (!this.isEntryPrefetchTarget(job.guildId, entryId)) {
+                    this.cancelPrefetch(job.guildId);
+                    return;
+                }
 
-            const entry = this.queue.findEntry(job.guildId, job.entryId);
-            if (!entry) {
-                this.cancelPrefetch(job.guildId);
-                return;
-            }
+                const entry = this.queue.findEntry(job.guildId, entryId);
+                if (!entry) {
+                    continue;
+                }
 
-            const track = await this.ensureResolvedTrack(job.guildId, entry.id);
-            if (!track) {
-                return;
-            }
+                const track = await this.ensureResolvedTrack(job.guildId, entry.id);
+                if (!track) {
+                    continue;
+                }
 
-            const warmCandidate = this.pickWarmCandidate(track);
-            if (!warmCandidate) {
-                return;
-            }
+                const warmCandidate = this.pickWarmCandidate(track);
+                if (!warmCandidate) {
+                    continue;
+                }
 
-            const ready = this.cache.getReadyAsset(this.getCandidateCacheKey(track, warmCandidate));
-            if (ready) {
-                this.queue.updateEntryState(job.guildId, entry.id, "ready");
-                void this.events.emit("track_ready", {
-                    guildId: job.guildId,
-                    entryId: entry.id
-                });
-                return;
-            }
+                const ready = this.cache.getReadyAsset(this.getCandidateCacheKey(track, warmCandidate));
+                if (ready) {
+                    this.queue.updateEntryState(job.guildId, entry.id, "ready");
+                    void this.events.emit("track_ready", {
+                        guildId: job.guildId,
+                        entryId: entry.id
+                    });
+                    continue;
+                }
 
-            await this.warmEntryCandidate(job.guildId, entry.id, track, warmCandidate);
+                await this.warmEntryCandidate(job.guildId, entry.id, track, warmCandidate);
+            }
         } finally {
             const active = this.prefetchJobs.get(job.guildId);
             if (active && active.jobId === job.jobId) {
@@ -618,6 +681,7 @@ class PlaybackCoordinator {
             }
 
             this.releaseGuildAsset(guildId);
+            this.clearPlaybackClock(guildId);
             void this.events.emit("track_finished", {
                 guildId,
                 entryId: current.id
@@ -636,6 +700,7 @@ class PlaybackCoordinator {
             }
 
             this.releaseGuildAsset(guildId);
+            this.clearPlaybackClock(guildId);
             await this.markEntryFailed(guildId, current.id, error.message || "Playback error.");
             this.queue.finishCurrentAndAdvance(guildId);
             await this.orchestrate(guildId);
@@ -670,6 +735,36 @@ class PlaybackCoordinator {
         }
         this.cache.release(current);
         this.activeAssetByGuild.delete(guildId);
+    }
+
+    private startPlaybackClock(guildId: string): void {
+        this.playbackClockByGuild.set(guildId, {
+            startedAtMs: Date.now(),
+            pausedAtMs: null,
+            pausedTotalMs: 0
+        });
+    }
+
+    private markPlaybackPaused(guildId: string): void {
+        const state = this.playbackClockByGuild.get(guildId);
+        if (!state || state.pausedAtMs !== null) {
+            return;
+        }
+        state.pausedAtMs = Date.now();
+    }
+
+    private markPlaybackResumed(guildId: string): void {
+        const state = this.playbackClockByGuild.get(guildId);
+        if (!state || state.pausedAtMs === null) {
+            return;
+        }
+        const pausedDuration = Math.max(0, Date.now() - state.pausedAtMs);
+        state.pausedTotalMs += pausedDuration;
+        state.pausedAtMs = null;
+    }
+
+    private clearPlaybackClock(guildId: string): void {
+        this.playbackClockByGuild.delete(guildId);
     }
 
     private rankCandidatesForCurrent(track: ResolvedTrack): ResolveCandidate[] {
@@ -766,16 +861,17 @@ class PlaybackCoordinator {
         };
         const resolveResult = await this.resolveLimiter.run(() => this.resolver.resolve(resolvePayload));
         const limited = resolveResult.entries.slice(0, this.playlistImportLimit);
+        const queueInputType = mapSourceTypeToQueueInputType(resolveResult.sourceType);
 
         const addInputs: AddQueueEntryInput[] = limited.map((entry) => ({
             guildId: input.guildId,
             requestedBy: input.requestedBy,
             input: inferExpandedTrackInput(entry, input.input),
-            inputType: inferExpandedTrackInputType(entry),
-            title: entry.title ?? null,
+            inputType: inferExpandedTrackInputType(entry) ?? queueInputType,
+            title: entry.title ?? deriveQueueTitle(input.input, resolveResult.sourceType),
             artists: entry.artists ?? [],
             durationMs: entry.durationMs ?? null,
-            state: "queued"
+            state: "resolved"
         }));
 
         if (addInputs.length === 0) {
@@ -783,34 +879,91 @@ class PlaybackCoordinator {
                 guildId: input.guildId,
                 requestedBy: input.requestedBy,
                 input: input.input,
-                inputType: "spotify_playlist",
+                inputType: queueInputType,
                 artists: [],
                 state: "queued"
             });
             return {
                 addedCount: 1,
                 playlistTruncated: false,
-                sourceType: "spotify_playlist",
+                sourceType: resolveResult.sourceType,
                 entryIds: [single.id]
             };
         }
 
         const created = this.queue.addMany(addInputs);
+        for (let i = 0; i < created.length; i++) {
+            const queueEntry = created[i];
+            const resolved = limited[i];
+            if (!queueEntry || !resolved) {
+                continue;
+            }
+
+            const normalizedTrack = this.toResolvedTrack(queueEntry, resolved);
+            this.resolvedTracksById.set(normalizedTrack.id, normalizedTrack);
+            this.queue.setEntryResolvedTrack(input.guildId, queueEntry.id, normalizedTrack.id, {
+                title: normalizedTrack.title,
+                artists: normalizedTrack.artists,
+                durationMs: normalizedTrack.durationMs
+            });
+        }
         return {
             addedCount: addInputs.length,
             playlistTruncated: resolveResult.entries.length > addInputs.length,
-            sourceType: "spotify_playlist",
+            sourceType: resolveResult.sourceType,
             entryIds: created.map((entry) => entry.id)
         };
     }
 
-    private isEntryCurrentOrNext(guildId: string, entryId: string): boolean {
-        const current = this.queue.getCurrentEntry(guildId);
-        if (current && current.id === entryId) {
-            return true;
+    private isEntryPrefetchTarget(guildId: string, entryId: string): boolean {
+        const targets = this.getPrefetchTargets(guildId, 2);
+        return targets.includes(entryId);
+    }
+
+    private getPrefetchTargets(guildId: string, count: number): string[] {
+        const queue = this.queue.getQueue(guildId);
+        if (count <= 0) {
+            return [];
         }
-        const next = this.queue.getNextEntry(guildId);
-        return Boolean(next && next.id === entryId);
+
+        const active = queue.entries
+            .filter((entry) => entry.state !== "failed" && entry.state !== "finished")
+            .sort((left, right) => left.position - right.position);
+        if (active.length === 0) {
+            return [];
+        }
+
+        const current = this.queue.getCurrentEntry(guildId);
+        const currentIndex = current
+            ? active.findIndex((entry) => entry.id === current.id)
+            : -1;
+
+        const targets: string[] = [];
+        for (let i = currentIndex + 1; i < active.length && targets.length < count; i++) {
+            const entry = active[i];
+            if (!entry) {
+                continue;
+            }
+            targets.push(entry.id);
+        }
+
+        if (targets.length < count && queue.loopMode === "queue") {
+            for (let i = 0; i < active.length && targets.length < count; i++) {
+                const entry = active[i];
+                if (!entry) {
+                    continue;
+                }
+                if (current && entry.id === current.id) {
+                    continue;
+                }
+                if (targets.includes(entry.id)) {
+                    continue;
+                }
+                targets.push(entry.id);
+            }
+        }
+
+        return targets;
     }
 
     private describeResolveError(error: unknown): string {
@@ -904,7 +1057,7 @@ function mapSourceTypeToQueueInputType(sourceType: SourceType): QueueInputType {
     if (sourceType === "spotify_track") {
         return "spotify_track";
     }
-    if (sourceType === "spotify_playlist") {
+    if (sourceType === "spotify_playlist" || sourceType === "spotify_album") {
         return "spotify_playlist";
     }
     return "direct_url";
@@ -935,12 +1088,48 @@ function inferExpandedTrackInput(entry: ResolvedEntry, fallbackPlaylistInput: st
     return fallbackPlaylistInput;
 }
 
-function inferExpandedTrackInputType(entry: ResolvedEntry): QueueInputType {
+function inferExpandedTrackInputType(entry: ResolvedEntry): QueueInputType | null {
     const canonical = entry.canonicalId ?? "";
     if (canonical.startsWith("spotify:track:")) {
         return "spotify_track";
     }
-    return "direct_url";
+    if (canonical.startsWith("url:") || canonical.startsWith("youtube:")) {
+        return "direct_url";
+    }
+    return null;
+}
+
+function deriveQueueTitle(input: string, detected: SourceType): string {
+    if (detected === "spotify_track") {
+        return "Spotify Track";
+    }
+    if (detected === "spotify_album") {
+        return "Spotify Album Track";
+    }
+    if (detected === "spotify_playlist") {
+        return "Spotify Playlist Track";
+    }
+    if (detected === "youtube") {
+        return "YouTube Track";
+    }
+
+    const parsed = safeUrl(input);
+    if (parsed) {
+        return `Audio from ${parsed.hostname}`;
+    }
+    return "Audio Track";
+}
+
+function areEqualEntryLists(left: string[], right: string[]): boolean {
+    if (left.length !== right.length) {
+        return false;
+    }
+    for (let i = 0; i < left.length; i++) {
+        if (left[i] !== right[i]) {
+            return false;
+        }
+    }
+    return true;
 }
 
 function safeUrl(input: string): URL | null {

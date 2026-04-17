@@ -2,6 +2,7 @@ import { ApplicationCommandOptionType } from "discord.js";
 import type { Command } from "../core/Command.js";
 import type { LoopMode } from "../playback/types.js";
 import { PlaybackCoordinator } from "../playback/PlaybackCoordinator.js";
+import { buildNoticeReply, buildQueuePanelReply } from "./ui/EchochanUi.js";
 
 class LoopCommand implements Command {
     public readonly name = "loop";
@@ -29,14 +30,24 @@ class LoopCommand implements Command {
         context: Parameters<Command["execute"]>[1]
     ): Promise<void> {
         if (!interaction.inGuild()) {
-            await interaction.editReply("Команда доступна только на сервере.");
+            await interaction.editReply(buildNoticeReply(interaction, {
+                title: "Команда недоступна",
+                description: "Команда работает только внутри сервера.",
+                tone: "warning"
+            }));
             return;
         }
 
         const mode = interaction.options.getString("mode", true) as LoopMode;
         const coordinator = context.services.get<PlaybackCoordinator>("coordinator");
         coordinator.setLoopMode(interaction.guildId, mode);
-        await interaction.editReply(`Loop mode: ${mode}`);
+        const queue = coordinator.getQueue(interaction.guildId);
+        await interaction.editReply(buildQueuePanelReply(interaction, queue, {
+            title: "Loop обновлён",
+            note: `Новый режим loop: ${mode}.`,
+            tone: "info",
+            limit: 8
+        }));
     }
 }
 

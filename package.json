@@ -9,7 +9,6 @@
   "scripts": {
     "installffmpeg": "node scripts/installffmpeg.mjs",
     "installytdlp": "node scripts/installytdlp.mjs",
-    "installspotiflac": "node scripts/installspotiflac.mjs",
     "installbinaries": "node scripts/installbinaries.mjs",
     "postinstall": "npm run installbinaries",
     "build": "tsc",
@@ -23,9 +22,6 @@
   "ytdlp": {
     "installDir": ".yt-dlp"
   },
-  "spotiflac": {
-    "installDir": ".spotiflac"
-  },
   "keywords": [],
   "author": "",
   "license": "ISC",
@@ -36,6 +32,7 @@
     "@discordjs/voice": "^0.19.2",
     "discord.js": "^14.26.2",
     "dotenv": "^17.4.2",
-    "postgres": "^3.4.9"
+    "postgres": "^3.4.9",
+    "spotify": "^0.3.0"
   }
 }
