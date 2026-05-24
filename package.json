@@ -12,6 +12,8 @@
     "installbinaries": "node scripts/installbinaries.mjs",
     "postinstall": "npm run installbinaries",
     "build": "tsc",
+    "start": "node dist/index.js",
+    "build:start": "npm run build && npm run start",
     "dev:start": "npm run build && node dist/index.js",
     "deploy": "npm run build && node dist/scripts/deployCommands.js global",
     "dev:deploy": "npm run build && node dist/scripts/deployCommands.js guild"
