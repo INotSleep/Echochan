@@ -17,8 +17,7 @@ type EchochanControlAction =
     | "loop"
     | "shuffle"
     | "refresh"
-    | "stop"
-    | "clear";
+    | "stop";
 
 type QueuePanelOptions = {
     title?: string;
@@ -73,19 +72,34 @@ function buildQueueEmbed(
     const tone = options.tone ?? "info";
     const visible = getVisibleQueueEntries(queue.entries, queue.currentIndex);
     const embed = createBaseEmbed(interaction, title, options.note ?? "", tone);
+    const summaryLine = [
+        `Статус: ${formatPlaybackState(queue.playbackState)}`,
+        `Цикл: ${formatLoopMode(queue.loopMode)}`,
+        `Шафл: ${queue.shuffleEnabled ? "вкл" : "выкл"}`,
+        `Треков: ${visible.length}`
+    ].join(" | ");
 
     if (visible.length === 0) {
         embed.setDescription([
             options.note?.trim(),
             "Сейчас очередь пустая. Добавь трек через `/play`."
         ].filter((part) => Boolean(part)).join("\n\n"));
+        embed.addFields({
+            name: "Сводка",
+            value: summaryLine
+        });
         embed.setFooter({
-            text: `loop: ${queue.loopMode} | shuffle: ${queue.shuffleEnabled ? "on" : "off"} | state: ${queue.playbackState}`
+            text: `Музыка готова к запуску`
         });
         return embed;
     }
 
     const current = visible[0] ?? null;
+    embed.addFields({
+        name: "Сводка",
+        value: summaryLine
+    });
+
     if (current) {
         embed.addFields({
             name: "Сейчас",
@@ -97,7 +111,7 @@ function buildQueueEmbed(
     if (upcoming.length > 0) {
         const upcomingLines = upcoming.map((entry, idx) => {
             const queuePosition = idx + 2;
-            return `${queuePosition}. ${formatEntryLine(entry)}`;
+            return formatEntryLine(entry, queuePosition);
         });
         embed.addFields({
             name: "Дальше",
@@ -118,7 +132,7 @@ function buildQueueEmbed(
     }
 
     embed.setFooter({
-        text: `loop: ${queue.loopMode} | shuffle: ${queue.shuffleEnabled ? "on" : "off"} | visible: ${visible.length} | state: ${queue.playbackState}`
+        text: `Позиция: ${queue.currentIndex === null ? "-" : queue.currentIndex + 1} | Обновлено`
     });
 
     return embed;
@@ -129,22 +143,21 @@ function buildQueueControlRows(queue: GuildQueueState): ActionRowBuilder<ButtonB
     const isPaused = queue.playbackState === "paused";
     const pauseLabel = isPaused ? "Продолжить" : "Пауза";
     const pauseStyle = isPaused ? ButtonStyle.Success : ButtonStyle.Primary;
-    const loopLabel = `Loop: ${queue.loopMode}`;
-    const shuffleLabel = `Shuffle: ${queue.shuffleEnabled ? "on" : "off"}`;
+    const loopLabel = `Цикл: ${queue.loopMode}`;
+    const shuffleLabel = `Шафл: ${queue.shuffleEnabled ? "вкл" : "выкл"}`;
     const shuffleStyle = queue.shuffleEnabled ? ButtonStyle.Success : ButtonStyle.Secondary;
     const loopStyle = queue.loopMode === "off" ? ButtonStyle.Secondary : ButtonStyle.Success;
 
     const primaryRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
         buildControlButton("pause_resume", pauseLabel, pauseStyle, empty),
-        buildControlButton("skip", "Skip", ButtonStyle.Secondary, empty),
+        buildControlButton("skip", "Пропуск", ButtonStyle.Secondary, empty),
         buildControlButton("loop", loopLabel, loopStyle, empty),
         buildControlButton("shuffle", shuffleLabel, shuffleStyle, empty),
         buildControlButton("refresh", "Обновить", ButtonStyle.Secondary, false)
     );
 
     const dangerRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
-        buildControlButton("stop", "Stop", ButtonStyle.Danger, empty),
-        buildControlButton("clear", "Clear", ButtonStyle.Danger, empty)
+        buildControlButton("stop", "Стоп", ButtonStyle.Danger, empty)
     );
 
     return [primaryRow, dangerRow];
@@ -184,7 +197,6 @@ function parseEchochanControlAction(value: string): EchochanControlAction | null
         || action === "shuffle"
         || action === "refresh"
         || action === "stop"
-        || action === "clear"
     ) {
         return action;
     }
@@ -217,30 +229,37 @@ function nextLoopMode(current: LoopMode): LoopMode {
 }
 
 function describeEntryState(state: QueueEntryState): string {
-    if (state === "queued") return "queued";
-    if (state === "resolving_meta") return "resolving metadata";
-    if (state === "resolved") return "resolved";
-    if (state === "warming") return "caching";
-    if (state === "ready") return "ready";
-    if (state === "playing") return "playing";
-    if (state === "finished") return "finished";
-    return "failed";
+    if (state === "queued") return "в очереди";
+    if (state === "resolving_meta") return "поиск метаданных";
+    if (state === "resolved") return "метаданные готовы";
+    if (state === "warming") return "подготовка аудио";
+    if (state === "ready") return "готово";
+    if (state === "playing") return "играет";
+    if (state === "finished") return "завершено";
+    return "ошибка";
 }
 
-function formatEntryLine(entry: QueueEntry): string {
-    const title = entry.title ?? entry.input;
-    const artists = entry.artists.length > 0 ? entry.artists.join(", ") : "Unknown artist";
+function formatEntryLine(entry: QueueEntry, position: number): string {
+    const title = clampText(entry.title ?? entry.input, 56);
+    const artists = clampText(entry.artists.length > 0 ? entry.artists.join(", ") : "Неизвестный артист", 32);
     const duration = formatDuration(entry.durationMs);
     const state = describeEntryState(entry.state);
-    return `${title} | ${artists} | ${duration} | ${state}`;
+    return `\`${position.toString().padStart(2, "0")}.\` **${title}** — ${artists} · ${duration} · ${state}`;
 }
 
 function formatCurrentEntry(entry: QueueEntry): string {
-    const title = entry.title ?? entry.input;
-    const artists = entry.artists.length > 0 ? entry.artists.join(", ") : "Unknown artist";
+    const title = clampText(entry.title ?? entry.input, 80);
+    const artists = clampText(entry.artists.length > 0 ? entry.artists.join(", ") : "Неизвестный артист", 64);
     const duration = formatDuration(entry.durationMs);
     const state = describeEntryState(entry.state);
-    return `1. ${title}\n${artists} | ${duration} | ${state}`;
+    const requestedBy = entry.requestedBy ? `<@${entry.requestedBy}>` : "неизвестно";
+    const source = formatInputType(entry.inputType);
+    return [
+        `**${title}**`,
+        `${artists}`,
+        `Источник: ${source} | Длительность: ${duration}`,
+        `Статус: ${state} | Запросил: ${requestedBy}`
+    ].join("\n");
 }
 
 function formatDuration(durationMs: number | null): string {
@@ -275,7 +294,7 @@ function createBaseEmbed(
         embed.setThumbnail(avatarUrl);
     }
     embed.setFooter({
-        text: "Chibi music mode"
+        text: "Музыкальный режим Echochan"
     });
     return embed;
 }
@@ -285,6 +304,33 @@ function getToneColor(tone: EchochanTone): number {
     if (tone === "warning") return 0xf4b86a;
     if (tone === "error") return 0xec6f8f;
     return 0x8c7dff;
+}
+
+function formatLoopMode(loopMode: LoopMode): string {
+    if (loopMode === "track") return "трек";
+    if (loopMode === "queue") return "очередь";
+    return "выкл";
+}
+
+function formatPlaybackState(state: GuildQueueState["playbackState"]): string {
+    if (state === "playing") return "играет";
+    if (state === "paused") return "пауза";
+    if (state === "stopped") return "остановлено";
+    return "ожидание";
+}
+
+function formatInputType(inputType: QueueEntry["inputType"]): string {
+    if (inputType === "spotify_track") return "Spotify";
+    if (inputType === "spotify_playlist") return "Spotify playlist/album";
+    return "YouTube/URL";
+}
+
+function clampText(value: string, maxLength: number): string {
+    const normalized = value.replace(/\s+/g, " ").trim();
+    if (normalized.length <= maxLength) {
+        return normalized;
+    }
+    return `${normalized.slice(0, Math.max(1, maxLength - 1))}…`;
 }
 
 export {

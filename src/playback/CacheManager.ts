@@ -10,7 +10,6 @@ type CacheProducer = "spotify" | "ytdlp";
 
 type CacheManagerOptions = {
     cacheDir?: string;
-    maxSizeBytes?: number;
     readyTtlMs?: number;
     tempTtlMs?: number;
 };
@@ -19,7 +18,6 @@ class CacheManager {
     private readonly logger: Logger;
     private readonly events: EventBus<EchochanEvents>;
     private readonly cacheDir: string;
-    private readonly maxSizeBytes: number;
     private readonly readyTtlMs: number;
     private readonly tempTtlMs: number;
     private readonly assets = new Map<string, CacheAsset>();
@@ -32,7 +30,6 @@ class CacheManager {
         this.events = events;
         this.logger = logger.child("Cache");
         this.cacheDir = path.resolve(process.cwd(), options.cacheDir ?? ".cache", "media");
-        this.maxSizeBytes = options.maxSizeBytes ?? 10 * 1024 * 1024 * 1024;
         this.readyTtlMs = options.readyTtlMs ?? 7 * 24 * 60 * 60 * 1000;
         this.tempTtlMs = options.tempTtlMs ?? 2 * 60 * 60 * 1000;
     }
@@ -178,7 +175,6 @@ class CacheManager {
             asset: this.cloneAsset(asset)
         });
 
-        await this.cleanup();
         return this.cloneAsset(asset);
     }
 
@@ -193,64 +189,8 @@ class CacheManager {
         return this.cloneAsset(asset);
     }
 
-    public async cleanup(): Promise<void> {
-        const now = Date.now();
-        const evictedAssets: CacheAsset[] = [];
-
-        for (const [key, asset] of this.assets.entries()) {
-            const expiresAtMs = parseOptionalDate(asset.expiresAt);
-            const isTemp = asset.state === "temp";
-            const staleTemp = isTemp && now - Date.parse(asset.updatedAt) > this.tempTtlMs;
-            const expired = typeof expiresAtMs === "number" && expiresAtMs <= now;
-            const canDelete = asset.refCount === 0 && (staleTemp || expired || asset.state === "broken");
-
-            if (!canDelete) {
-                continue;
-            }
-
-            await safeUnlink(asset.filePath);
-            this.assets.delete(key);
-            evictedAssets.push(this.cloneAsset(asset));
-        }
-
-        let totalSize = this.getReadySizeTotal();
-        if (totalSize > this.maxSizeBytes) {
-            const evictableReady = [...this.assets.values()]
-                .filter((asset) => asset.state === "ready" && asset.refCount === 0)
-                .sort((left, right) => Date.parse(left.lastAccessAt) - Date.parse(right.lastAccessAt));
-
-            for (const asset of evictableReady) {
-                if (totalSize <= this.maxSizeBytes) {
-                    break;
-                }
-                await safeUnlink(asset.filePath);
-                this.assets.delete(asset.cacheKey);
-                totalSize -= asset.sizeBytes;
-                evictedAssets.push(this.cloneAsset(asset));
-            }
-        }
-
-        for (const asset of evictedAssets) {
-            void this.events.emit("cache_asset_evicted", {
-                cacheKey: asset.cacheKey,
-                asset
-            });
-        }
-    }
-
     public listAssets(): CacheAsset[] {
         return [...this.assets.values()].map((asset) => this.cloneAsset(asset));
-    }
-
-    private getReadySizeTotal(): number {
-        let total = 0;
-        for (const asset of this.assets.values()) {
-            if (asset.state !== "ready") {
-                continue;
-            }
-            total += asset.sizeBytes;
-        }
-        return total;
     }
 
     private cloneAsset(asset: CacheAsset): CacheAsset {
@@ -269,21 +209,6 @@ function sanitizeExtension(value: string): string {
         return trimmed.toLowerCase();
     }
     return `.${trimmed.toLowerCase()}`;
-}
-
-function parseOptionalDate(value: string | null): number | null {
-    if (!value) {
-        return null;
-    }
-    const timestamp = Date.parse(value);
-    return Number.isFinite(timestamp) ? timestamp : null;
-}
-
-async function safeUnlink(filePath: string): Promise<void> {
-    if (!filePath) {
-        return;
-    }
-    await fs.promises.unlink(filePath).catch(() => undefined);
 }
 
 export type {

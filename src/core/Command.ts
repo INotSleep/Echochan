@@ -1,4 +1,11 @@
-import { Events, type ApplicationCommandDataResolvable, type ChatInputCommandInteraction, type Client, type Interaction } from "discord.js";
+import {
+    Events,
+    type ApplicationCommandDataResolvable,
+    type AutocompleteInteraction,
+    type ChatInputCommandInteraction,
+    type Client,
+    type Interaction
+} from "discord.js";
 import type { DiscordClientAdapter } from "./DiscordClientAdapter.js";
 import type { EventBus } from "./EventBus.js";
 import type { Events as EchochanEvents } from "./Events.js";
@@ -18,6 +25,7 @@ interface Command {
     name: string;
     data: ApplicationCommandDataResolvable;
     execute(interaction: ChatInputCommandInteraction, context: CommandContext): Promise<void>;
+    autocomplete?(interaction: AutocompleteInteraction, context: CommandContext): Promise<void>;
 }
 
 class CommandRegistry {
@@ -73,6 +81,22 @@ class CommandRegistry {
     }
 
     private async handleInteraction(interaction: Interaction): Promise<void> {
+        if (interaction.isAutocomplete()) {
+            const command = this.commands.get(interaction.commandName);
+            if (!command?.autocomplete) {
+                await interaction.respond([]).catch(() => undefined);
+                return;
+            }
+
+            try {
+                await command.autocomplete(interaction, this.context);
+            } catch (error) {
+                this.logger.warn(`Autocomplete for command "${command.name}" failed:`, error);
+                await interaction.respond([]).catch(() => undefined);
+            }
+            return;
+        }
+
         if (!interaction.isChatInputCommand()) {
             return;
         }

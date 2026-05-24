@@ -8,7 +8,7 @@ class LoopCommand implements Command {
     public readonly name = "loop";
     public readonly data = {
         name: "loop",
-        description: "Установить режим loop",
+        description: "Настроить режим повтора",
         dmPermission: false,
         options: [
             {
@@ -17,9 +17,9 @@ class LoopCommand implements Command {
                 type: ApplicationCommandOptionType.String as const,
                 required: true,
                 choices: [
-                    { name: "off", value: "off" },
-                    { name: "track", value: "track" },
-                    { name: "queue", value: "queue" }
+                    { name: "Выключен", value: "off" },
+                    { name: "Один трек", value: "track" },
+                    { name: "Вся очередь", value: "queue" }
                 ]
             }
         ]
@@ -43,8 +43,8 @@ class LoopCommand implements Command {
         coordinator.setLoopMode(interaction.guildId, mode);
         const queue = coordinator.getQueue(interaction.guildId);
         await interaction.editReply(buildQueuePanelReply(interaction, queue, {
-            title: "Loop обновлён",
-            note: `Новый режим loop: ${mode}.`,
+            title: "Режим повтора обновлён",
+            note: `Текущий режим: ${mode}.`,
             tone: "info",
             limit: 8
         }));

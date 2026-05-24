@@ -7,7 +7,7 @@ class NowPlayingCommand implements Command {
     public readonly name = "nowplaying";
     public readonly data = {
         name: "nowplaying",
-        description: "Показать текущий трек и прогресс",
+        description: "Показать текущий трек и прогресс воспроизведения",
         dmPermission: false
     };
 
@@ -43,7 +43,7 @@ class NowPlayingCommand implements Command {
         const progressLine = buildProgressLine(progressMs, durationMs, queue.playbackState);
         const artistLine = current.artists.length > 0
             ? `Артист: ${current.artists.join(", ")}`
-            : "Артист: Unknown artist";
+            : "Артист: неизвестен";
         const title = current.title ?? current.input;
         const note = [
             `Сейчас: ${title}`,
@@ -53,7 +53,7 @@ class NowPlayingCommand implements Command {
         ].join("\n");
 
         await interaction.editReply(buildQueuePanelReply(interaction, queue, {
-            title: "Now Playing",
+            title: "Сейчас играет",
             note,
             tone: "info",
             limit: 8
@@ -89,7 +89,7 @@ function buildProgressLine(
     const width = 10;
     const filled = Math.max(0, Math.min(width, Math.round(ratio * width)));
     const bar = `[${"#".repeat(filled)}${"-".repeat(width - filled)}]`;
-    const suffix = playbackState === "paused" ? " (paused)" : "";
+    const suffix = playbackState === "paused" ? " (пауза)" : "";
     return `Прогресс: ${bar} ${formatDuration(clamped)} / ${formatDuration(durationMs)}${suffix}`;
 }
 

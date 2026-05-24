@@ -7,6 +7,7 @@ import {
     parseDurationMs,
     parseJsonFromMixedOutput,
     readString,
+    safeUrl,
     stableId
 } from "./shared.js";
 
@@ -39,7 +40,7 @@ class YtDlpResolverMicroModule implements ResolverMicroModule {
         if (context.sourceType === "youtube") {
             args.push("--no-playlist");
         }
-        args.push(context.input);
+        args.push(this.toResolveInput(context));
 
         const stdout = await this.runBinary(this.binaryPath, args);
         const payload = parseJsonFromMixedOutput(stdout);
@@ -135,6 +136,27 @@ class YtDlpResolverMicroModule implements ResolverMicroModule {
                 ext: "mp3"
             }
         };
+    }
+
+    private toResolveInput(context: ResolveModuleContext): string {
+        const normalized = context.input.trim();
+        if (!normalized) {
+            return "ytsearch1:music";
+        }
+
+        if (context.sourceType !== "unknown") {
+            return normalized;
+        }
+
+        if (safeUrl(normalized)) {
+            return normalized;
+        }
+
+        if (normalized.toLowerCase().startsWith("ytsearch")) {
+            return normalized;
+        }
+
+        return `ytsearch5:${normalized}`;
     }
 }
 

@@ -1,6 +1,5 @@
 import type { ApplicationCommandDataResolvable } from "discord.js";
 import type { Command } from "../core/Command.js";
-import { ClearCommand } from "./ClearCommand.js";
 import { JoinCommand } from "./JoinCommand.js";
 import { LeaveCommand } from "./LeaveCommand.js";
 import { LoopCommand } from "./LoopCommand.js";
@@ -31,7 +30,6 @@ const commandConstructors: CommandConstructor[] = [
     ResumeCommand,
     ShuffleCommand,
     LoopCommand,
-    ClearCommand,
     StopCommand,
     LeaveCommand
 ];

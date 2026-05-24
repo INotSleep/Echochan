@@ -1,26 +1,47 @@
-import { ApplicationCommandOptionType } from "discord.js";
-import { access } from "node:fs/promises";
-import path from "node:path";
+import { ApplicationCommandOptionType, type AutocompleteInteraction } from "discord.js";
 import type { Command } from "../core/Command.js";
 import { buildNoticeReply, buildQueuePanelReply } from "./ui/EchochanUi.js";
 import { MusicPlaybackService } from "../services/MusicPlaybackService.js";
 import { PlaybackCoordinator } from "../playback/PlaybackCoordinator.js";
+import { LocalResolverService } from "../services/LocalResolverService.js";
 
 class PlayCommand implements Command {
     public readonly name = "play";
     public readonly data = {
         name: "play",
-        description: "Проиграть URL или локальный аудиофайл",
+        description: "Добавить трек в очередь (YouTube, Spotify или поиск)",
         dmPermission: false,
         options: [
             {
                 name: "input",
-                description: "URL или имя локального файла (по умолчанию audio.mp3)",
+                description: "Ссылка или запрос (например: artist - track)",
                 type: ApplicationCommandOptionType.String as const,
-                required: false
+                required: true,
+                autocomplete: true
             }
         ]
     };
+
+    public async autocomplete(
+        interaction: AutocompleteInteraction,
+        context: Parameters<Command["execute"]>[1]
+    ): Promise<void> {
+        const focused = interaction.options.getFocused(true);
+        if (focused.name !== "input" || focused.type !== ApplicationCommandOptionType.String) {
+            await interaction.respond([]);
+            return;
+        }
+
+        const query = String(focused.value ?? "").trim();
+        if (query.length < 2) {
+            await interaction.respond([]);
+            return;
+        }
+
+        const resolver = context.services.get<LocalResolverService>("resolver");
+        const suggestions = await resolver.suggestTracks(query, 10);
+        await interaction.respond(suggestions.slice(0, 25));
+    }
 
     public async execute(
         interaction: Parameters<Command["execute"]>[0],
@@ -38,22 +59,14 @@ class PlayCommand implements Command {
             return;
         }
 
-        const input = interaction.options.getString("input") ?? "audio.mp3";
-
-        const localPath = this.tryResolveSafeLocalPath(input);
-        if (localPath) {
-            try {
-                await access(localPath);
-                music.playSource(channel, localPath);
-                await interaction.editReply(buildNoticeReply(interaction, {
-                    title: "Локальный файл запущен",
-                    description: `Запускаю \`${input}\` в канале **${channel.name}**.`,
-                    tone: "success"
-                }));
-                return;
-            } catch {
-                // fall through: if local file does not exist, try resolver as URL/query input.
-            }
+        const input = interaction.options.getString("input", true).trim();
+        if (!input) {
+            await interaction.editReply(buildNoticeReply(interaction, {
+                title: "Нужен источник трека",
+                description: "Передай ссылку YouTube/Spotify или текстовый запрос.",
+                tone: "warning"
+            }));
+            return;
         }
 
         const coordinator = context.services.get<PlaybackCoordinator>("coordinator");
@@ -107,27 +120,6 @@ class PlayCommand implements Command {
         }
     }
 
-    private tryResolveSafeLocalPath(input: string): string | null {
-        if (input.includes("..") || path.isAbsolute(input)) {
-            return null;
-        }
-
-        const possibleUrl = this.safeUrl(input);
-        if (possibleUrl) {
-            return null;
-        }
-
-        const filePath = path.resolve(process.cwd(), input);
-        return filePath;
-    }
-
-    private safeUrl(input: string): URL | null {
-        try {
-            return new URL(input);
-        } catch {
-            return null;
-        }
-    }
 }
 
 function describeEntryState(state: string): string {

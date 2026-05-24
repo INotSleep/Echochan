@@ -27,7 +27,7 @@ class SkipCommand implements Command {
         await coordinator.skip(interaction.guildId);
         const queue = coordinator.getQueue(interaction.guildId);
         await interaction.editReply(buildQueuePanelReply(interaction, queue, {
-            title: "Skip выполнен",
+            title: "Трек пропущен",
             note: "Текущий трек пропущен, запускаю следующий.",
             tone: "info",
             limit: 6

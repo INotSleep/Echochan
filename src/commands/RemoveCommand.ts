@@ -40,7 +40,7 @@ class RemoveCommand implements Command {
         const target = visible[position - 1];
         if (!target) {
             await interaction.editReply(buildQueuePanelReply(interaction, queue, {
-                title: "Remove не выполнен",
+                title: "Удаление не выполнено",
                 note: `Позиция ${position} не найдена в видимой очереди.`,
                 tone: "warning",
                 limit: 8
@@ -52,7 +52,7 @@ class RemoveCommand implements Command {
         if (!removed) {
             const updatedQueue = coordinator.getQueue(interaction.guildId);
             await interaction.editReply(buildQueuePanelReply(interaction, updatedQueue, {
-                title: "Remove не выполнен",
+                title: "Удаление не выполнено",
                 note: "Не удалось удалить элемент очереди.",
                 tone: "warning",
                 limit: 8
@@ -63,7 +63,7 @@ class RemoveCommand implements Command {
         const updatedQueue = coordinator.getQueue(interaction.guildId);
         const label = target.title ?? target.input;
         await interaction.editReply(buildQueuePanelReply(interaction, updatedQueue, {
-            title: "Remove выполнен",
+            title: "Трек удалён",
             note: `Удалила из очереди позицию ${position}: ${label}`,
             tone: "success",
             limit: 8

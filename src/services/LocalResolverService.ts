@@ -7,7 +7,14 @@ import type { ResolveCandidate, ResolveError, ResolveInput, ResolveResult, Resol
 import type { ResolverClient } from "../resolver/client/ResolverClient.js";
 import { SpotifyResolverMicroModule } from "../resolver/micromodules/SpotifyResolverMicroModule.js";
 import type { ResolveModuleContext, ResolverMicroModule } from "../resolver/micromodules/contracts.js";
-import { detectSourceType } from "../resolver/micromodules/shared.js";
+import {
+    detectSourceType,
+    extractEntries,
+    normalizeArtists,
+    parseDurationMs,
+    parseJsonFromMixedOutput,
+    readString
+} from "../resolver/micromodules/shared.js";
 import { YtDlpResolverMicroModule } from "../resolver/micromodules/YtDlpResolverMicroModule.js";
 
 const execFileAsync = promisify(execFile);
@@ -30,6 +37,11 @@ type LocalResolverOptions = {
     timeoutMs?: number;
     ytdlpBinary?: string;
     microModules?: ResolverMicroModule[];
+};
+
+type TrackSuggestion = {
+    name: string;
+    value: string;
 };
 
 class LocalResolverService implements ResolverClient {
@@ -84,6 +96,75 @@ class LocalResolverService implements ResolverClient {
         }
 
         throw new LocalResolverError("NOT_FOUND", "No tracks were resolved for this input.", requestId);
+    }
+
+    public async suggestTracks(query: string, limit: number = 10): Promise<TrackSuggestion[]> {
+        const normalized = query.trim();
+        if (normalized.length < 2) {
+            return [];
+        }
+
+        const maxItems = Math.max(1, Math.min(25, Math.floor(limit)));
+        const searchInput = `ytsearch${maxItems}:${normalized}`;
+        const args = [
+            "--dump-single-json",
+            "--no-warnings",
+            "--flat-playlist",
+            searchInput
+        ];
+
+        try {
+            const result = await execFileAsync(this.ytdlpBinary, args, {
+                timeout: Math.min(this.timeoutMs, 2_800),
+                maxBuffer: 20 * 1024 * 1024,
+                windowsHide: true,
+                env: buildExecEnv()
+            });
+            const payload = parseJsonFromMixedOutput(result.stdout);
+            const entries = extractEntries(payload);
+            const suggestions: TrackSuggestion[] = [];
+            const seenValues = new Set<string>();
+
+            for (const rawEntry of entries) {
+                if (suggestions.length >= maxItems) {
+                    break;
+                }
+
+                if (!rawEntry || typeof rawEntry !== "object") {
+                    continue;
+                }
+
+                const entry = rawEntry as Record<string, unknown>;
+                const title = readString(entry.title) ?? readString(entry.fulltitle);
+                if (!title) {
+                    continue;
+                }
+
+                const artist = normalizeArtists(entry.artists)?.[0]
+                    ?? readString(entry.artist)
+                    ?? readString(entry.channel)
+                    ?? readString(entry.uploader)
+                    ?? null;
+                const durationMs = parseDurationMs(entry.duration);
+                const duration = durationMs ? formatDuration(durationMs) : null;
+                const label = buildSuggestionLabel(title, artist, duration);
+                const value = buildSuggestionValue(entry, title, artist);
+
+                if (!value || seenValues.has(value)) {
+                    continue;
+                }
+
+                seenValues.add(value);
+                suggestions.push({
+                    name: trimForDiscord(label),
+                    value: trimForDiscord(value)
+                });
+            }
+
+            return suggestions;
+        } catch {
+            return [];
+        }
     }
 
     private createDefaultMicroModules(): ResolverMicroModule[] {
@@ -230,3 +311,60 @@ export {
     LocalResolverService,
     LocalResolverError
 };
+
+export type {
+    TrackSuggestion
+};
+
+function buildSuggestionLabel(title: string, artist: string | null, duration: string | null): string {
+    const parts = [title.trim()];
+    if (artist) {
+        parts.push(artist.trim());
+    }
+    if (duration) {
+        parts.push(duration);
+    }
+    return parts.join(" | ");
+}
+
+function buildSuggestionValue(entry: Record<string, unknown>, title: string, artist: string | null): string {
+    const webpage = readString(entry.webpage_url);
+    if (webpage) {
+        return webpage;
+    }
+
+    const rawUrl = readString(entry.url);
+    if (rawUrl?.startsWith("http://") || rawUrl?.startsWith("https://")) {
+        return rawUrl;
+    }
+
+    const id = readString(entry.id);
+    if (id) {
+        return `https://www.youtube.com/watch?v=${id}`;
+    }
+
+    const fallback = [title, artist].filter((value): value is string => Boolean(value)).join(" ").trim();
+    if (!fallback) {
+        return "";
+    }
+    return `ytsearch1:${fallback}`;
+}
+
+function trimForDiscord(value: string): string {
+    const normalized = value.trim().replace(/\s+/g, " ");
+    if (normalized.length <= 100) {
+        return normalized;
+    }
+    return normalized.slice(0, 100);
+}
+
+function formatDuration(durationMs: number): string {
+    const totalSeconds = Math.max(0, Math.floor(durationMs / 1000));
+    const hours = Math.floor(totalSeconds / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = totalSeconds % 60;
+    if (hours > 0) {
+        return `${hours}:${minutes.toString().padStart(2, "0")}:${seconds.toString().padStart(2, "0")}`;
+    }
+    return `${minutes}:${seconds.toString().padStart(2, "0")}`;
+}

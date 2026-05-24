@@ -27,7 +27,7 @@ class ShuffleCommand implements Command {
         coordinator.shuffle(interaction.guildId);
         const queue = coordinator.getQueue(interaction.guildId);
         await interaction.editReply(buildQueuePanelReply(interaction, queue, {
-            title: "Shuffle выполнен",
+            title: "Очередь перемешана",
             note: "Перемешала очередь. Текущий трек сохранён.",
             tone: "success",
             limit: 8

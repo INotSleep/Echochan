@@ -71,7 +71,7 @@ class EchochanUiModule implements Module {
 
     private async runQueueControl(
         interaction: ButtonInteraction,
-        action: "pause_resume" | "skip" | "loop" | "shuffle" | "refresh" | "stop" | "clear"
+        action: "pause_resume" | "skip" | "loop" | "shuffle" | "refresh" | "stop"
     ): Promise<void> {
         const coordinator = this.services.get<PlaybackCoordinator>("coordinator");
         const guildId = interaction.guildId;
@@ -99,16 +99,13 @@ class EchochanUiModule implements Module {
             } else if (action === "loop") {
                 const next = nextLoopMode(before.loopMode);
                 coordinator.setLoopMode(guildId, next);
-                note = `Режим loop переключен: ${next}.`;
+                note = `Режим цикла: ${next}.`;
             } else if (action === "shuffle") {
                 coordinator.setShuffle(guildId, !before.shuffleEnabled);
-                note = `Shuffle: ${!before.shuffleEnabled ? "on" : "off"}.`;
+                note = `Шафл: ${!before.shuffleEnabled ? "вкл" : "выкл"}.`;
             } else if (action === "stop") {
                 await coordinator.stop(guildId, false);
                 note = "Воспроизведение остановлено.";
-            } else if (action === "clear") {
-                await coordinator.clear(guildId);
-                note = "Очередь очищена.";
             }
         } catch (error) {
             note = `Операция не удалась: ${error instanceof Error ? error.message : "неизвестная ошибка"}`;

@@ -49,7 +49,7 @@ class MoveCommand implements Command {
         const toEntry = visible[to - 1];
         if (!fromEntry || !toEntry) {
             await interaction.editReply(buildQueuePanelReply(interaction, queue, {
-                title: "Move не выполнен",
+                title: "Перемещение не выполнено",
                 note: "Проверь позиции: одна из них выходит за границы очереди.",
                 tone: "warning",
                 limit: 8
@@ -61,7 +61,7 @@ class MoveCommand implements Command {
         if (!moved) {
             const updatedQueue = coordinator.getQueue(interaction.guildId);
             await interaction.editReply(buildQueuePanelReply(interaction, updatedQueue, {
-                title: "Move не выполнен",
+                title: "Перемещение не выполнено",
                 note: "Не удалось переместить элемент. Проверь позиции и попробуй ещё раз.",
                 tone: "warning",
                 limit: 8
@@ -71,7 +71,7 @@ class MoveCommand implements Command {
 
         const updatedQueue = coordinator.getQueue(interaction.guildId);
         await interaction.editReply(buildQueuePanelReply(interaction, updatedQueue, {
-            title: "Move выполнен",
+            title: "Трек перемещён",
             note: `Переместила трек с позиции ${from} на ${to}.`,
             tone: "success",
             limit: 8
