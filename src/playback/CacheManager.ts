@@ -64,8 +64,11 @@ class CacheManager {
     }
 
     public getReadyAsset(cacheKey: string): CacheAsset | null {
-        const asset = this.assets.get(cacheKey);
+        const asset = this.assets.get(cacheKey) ?? this.discoverReadyAsset(cacheKey);
         if (!asset || asset.state !== "ready") {
+            return null;
+        }
+        if (this.isReadyAssetExpired(asset)) {
             return null;
         }
         this.touch(cacheKey);
@@ -80,6 +83,7 @@ class CacheManager {
         const nowIso = new Date().toISOString();
         asset.lastAccessAt = nowIso;
         asset.updatedAt = nowIso;
+        void safeTouchFile(asset.filePath, new Date());
     }
 
     public retain(cacheKey: string): void {
@@ -193,10 +197,151 @@ class CacheManager {
         return [...this.assets.values()].map((asset) => this.cloneAsset(asset));
     }
 
+    public async cleanup(): Promise<void> {
+        await fs.promises.mkdir(this.cacheDir, { recursive: true });
+
+        const nowMs = Date.now();
+        const evictedAssets: CacheAsset[] = [];
+
+        for (const [cacheKey, asset] of this.assets.entries()) {
+            if (asset.refCount > 0) {
+                continue;
+            }
+
+            const shouldDelete =
+                asset.state === "broken"
+                || (asset.state === "temp" && this.isTempAssetExpired(asset, nowMs))
+                || (asset.state === "ready" && this.isReadyAssetExpired(asset, nowMs));
+
+            if (!shouldDelete) {
+                continue;
+            }
+
+            await safeUnlink(asset.filePath);
+            this.assets.delete(cacheKey);
+            evictedAssets.push(this.cloneAsset(asset));
+        }
+
+        const trackedPaths = new Set(
+            [...this.assets.values()].map((asset) => path.resolve(asset.filePath).toLowerCase())
+        );
+        const diskSweepDeleted = await this.cleanupOrphanedDiskFiles(nowMs, trackedPaths);
+
+        for (const asset of evictedAssets) {
+            void this.events.emit("cache_asset_evicted", {
+                cacheKey: asset.cacheKey,
+                asset
+            });
+        }
+
+        if (evictedAssets.length > 0 || diskSweepDeleted > 0) {
+            this.logger.info(
+                `Cache cleanup finished. evicted=${evictedAssets.length} orphaned_deleted=${diskSweepDeleted}`
+            );
+        }
+    }
+
     private cloneAsset(asset: CacheAsset): CacheAsset {
         return {
             ...asset
         };
+    }
+
+    private discoverReadyAsset(cacheKey: string): CacheAsset | null {
+        const prefix = `${cacheKey}.`;
+        let fileNames: string[] = [];
+        try {
+            fileNames = fs.readdirSync(this.cacheDir);
+        } catch {
+            return null;
+        }
+
+        const match = fileNames.find((fileName) => fileName.startsWith(prefix) && !fileName.includes(".tmp."));
+        if (!match) {
+            return null;
+        }
+
+        const filePath = path.join(this.cacheDir, match);
+        const stat = safeStatSync(filePath);
+        if (!stat?.isFile()) {
+            return null;
+        }
+
+        const nowMs = Date.now();
+        if (nowMs - stat.mtimeMs > this.readyTtlMs) {
+            return null;
+        }
+
+        const timestampIso = new Date(stat.mtimeMs).toISOString();
+        const asset: CacheAsset = {
+            cacheKey,
+            filePath,
+            format: path.extname(filePath).replace(".", "") || "bin",
+            sizeBytes: stat.size,
+            state: "ready",
+            producer: "ytdlp",
+            lastAccessAt: timestampIso,
+            refCount: 0,
+            expiresAt: new Date(stat.mtimeMs + this.readyTtlMs).toISOString(),
+            createdAt: timestampIso,
+            updatedAt: timestampIso
+        };
+        this.assets.set(cacheKey, asset);
+        return asset;
+    }
+
+    private isReadyAssetExpired(asset: CacheAsset, nowMs: number = Date.now()): boolean {
+        const expiresAtMs = Date.parse(asset.expiresAt ?? "");
+        if (Number.isFinite(expiresAtMs)) {
+            return expiresAtMs <= nowMs;
+        }
+
+        const fileStat = safeStatSync(asset.filePath);
+        if (fileStat?.isFile()) {
+            return nowMs - fileStat.mtimeMs > this.readyTtlMs;
+        }
+
+        return true;
+    }
+
+    private isTempAssetExpired(asset: CacheAsset, nowMs: number): boolean {
+        const fileStat = safeStatSync(asset.filePath);
+        if (fileStat?.isFile()) {
+            return nowMs - fileStat.mtimeMs > this.tempTtlMs;
+        }
+
+        return nowMs - Date.parse(asset.updatedAt) > this.tempTtlMs;
+    }
+
+    private async cleanupOrphanedDiskFiles(nowMs: number, trackedPaths: Set<string>): Promise<number> {
+        const entries = await fs.promises.readdir(this.cacheDir, { withFileTypes: true }).catch(() => []);
+        let deleted = 0;
+
+        for (const entry of entries) {
+            if (!entry.isFile()) {
+                continue;
+            }
+
+            const filePath = path.join(this.cacheDir, entry.name);
+            if (trackedPaths.has(path.resolve(filePath).toLowerCase())) {
+                continue;
+            }
+
+            const stat = await fs.promises.stat(filePath).catch(() => null);
+            if (!stat?.isFile()) {
+                continue;
+            }
+
+            const ttlMs = entry.name.includes(".tmp.") ? this.tempTtlMs : this.readyTtlMs;
+            if (nowMs - stat.mtimeMs <= ttlMs) {
+                continue;
+            }
+
+            await safeUnlink(filePath);
+            deleted += 1;
+        }
+
+        return deleted;
     }
 }
 
@@ -209,6 +354,28 @@ function sanitizeExtension(value: string): string {
         return trimmed.toLowerCase();
     }
     return `.${trimmed.toLowerCase()}`;
+}
+
+function safeStatSync(filePath: string): fs.Stats | null {
+    try {
+        return fs.statSync(filePath);
+    } catch {
+        return null;
+    }
+}
+
+async function safeUnlink(filePath: string): Promise<void> {
+    if (!filePath) {
+        return;
+    }
+    await fs.promises.unlink(filePath).catch(() => undefined);
+}
+
+async function safeTouchFile(filePath: string, date: Date): Promise<void> {
+    if (!filePath) {
+        return;
+    }
+    await fs.promises.utimes(filePath, date, date).catch(() => undefined);
 }
 
 export type {
