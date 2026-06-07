@@ -7,6 +7,7 @@ import type { ResolveCandidate, ResolveError, ResolveInput, ResolveResult, Resol
 import type { ResolverClient } from "../resolver/client/ResolverClient.js";
 import { SpotifyResolverMicroModule } from "../resolver/micromodules/SpotifyResolverMicroModule.js";
 import type { ResolveModuleContext, ResolverMicroModule } from "../resolver/micromodules/contracts.js";
+import { prependYtDlpSharedArgs } from "../core/YtDlpArgs.js";
 import {
     detectSourceType,
     extractEntries,
@@ -106,12 +107,12 @@ class LocalResolverService implements ResolverClient {
 
         const maxItems = Math.max(1, Math.min(25, Math.floor(limit)));
         const searchInput = `ytsearch${maxItems}:${normalized}`;
-        const args = [
+        const args = prependYtDlpSharedArgs([
             "--dump-single-json",
             "--no-warnings",
             "--flat-playlist",
             searchInput
-        ];
+        ]);
 
         try {
             const result = await execFileAsync(this.ytdlpBinary, args, {
@@ -192,7 +193,7 @@ class LocalResolverService implements ResolverClient {
 
     private async runBinary(binary: string, args: string[]): Promise<string> {
         try {
-            const result = await execFileAsync(binary, args, {
+            const result = await execFileAsync(binary, prependYtDlpSharedArgs(args), {
                 timeout: this.timeoutMs,
                 maxBuffer: 20 * 1024 * 1024,
                 windowsHide: true,

@@ -4,6 +4,7 @@ import process from "node:process";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { randomUUID } from "node:crypto";
+import { prependYtDlpSharedArgs } from "../core/YtDlpArgs.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -132,7 +133,7 @@ class BinaryDownloadService {
         let lastError: unknown = null;
 
         for (const sourceInput of attempts) {
-            const args = [
+            const args = prependYtDlpSharedArgs([
                 "--no-warnings",
                 "--no-playlist",
                 "--no-progress",
@@ -150,7 +151,7 @@ class BinaryDownloadService {
                 "--output",
                 outputPath,
                 sourceInput
-            ];
+            ]);
 
             try {
                 const result = await execFileAsync(this.ytdlpBinary, args, {
@@ -297,11 +298,11 @@ class BinaryDownloadService {
     }
 
     private async collectSearchCandidateUrls(query: string, expected: ExpectedTrackHints): Promise<string[]> {
-        const args = [
+        const args = prependYtDlpSharedArgs([
             "--dump-single-json",
             "--no-warnings",
             query
-        ];
+        ]);
 
         try {
             const result = await execFileAsync(this.ytdlpBinary, args, {
